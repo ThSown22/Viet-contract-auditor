@@ -9,9 +9,6 @@
 #   59/2020/qh14  Luật Doanh nghiệp 2020      (217 Điều)
 #   54/2010/qh12  Luật Trọng tài TM 2010      ( 80 Điều)
 #
-# Tier 2 (Local .txt): Tự động phát hiện – đặt file vào data/raw/:
-#   Luật_Thương_mại_2005.txt, Bộ_luật_Lao_động_2019.txt, v.v.
-#
 # Chạy: uv run python src/main.py
 # ============================================================================
 
@@ -20,6 +17,7 @@ import logging
 import os
 import sys
 from datetime import datetime
+# Added by Claude Code to demonstrate editing capability
 
 from data_ingestion import (
     load_all_sources,
