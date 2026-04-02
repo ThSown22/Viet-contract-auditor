@@ -1,0 +1,70 @@
+version: "3.9"
+
+services:
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: viet-contract-neo4j
+    restart: unless-stopped
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: ${NEO4J_AUTH:-neo4j/contract_audit_2024}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+      NEO4J_dbms_security_procedures_allowlist: apoc.*
+      NEO4J_apoc_export_file_enabled: "true"
+      NEO4J_apoc_import_file_enabled: "true"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p contract_audit_2024 'RETURN 1;' || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+    networks:
+      - rag_backend
+
+  qdrant:
+    image: qdrant/qdrant:v1.13.2
+    container_name: viet-contract-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    networks:
+      - rag_backend
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: viet-contract-postgres
+    restart: unless-stopped
+    ports:
+      - "55432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-viet_contract}
+      POSTGRES_USER: ${POSTGRES_USER:-rag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rag_secure_pwd}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rag} -d ${POSTGRES_DB:-viet_contract}"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+    networks:
+      - rag_backend
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  qdrant_storage:
+  postgres_data:
+
+networks:
+  rag_backend:
+    driver: bridge
