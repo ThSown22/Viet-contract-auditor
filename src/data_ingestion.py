@@ -158,7 +158,7 @@ def load_from_local_txt(filepath: str, law_id: str, law_name: str) -> list[dict]
     matches = list(_LOCAL_ARTICLE_RE.finditer(text))
 
     if not matches:
-        logger.warning(f"  ⚠️ Không tìm 'Điều' nào trong '{filepath}'. Bỏ qua.")
+        logger.warning(f"   Không tìm 'Điều' nào trong '{filepath}'. Bỏ qua.")
         return []
 
     records: list[dict] = []
@@ -214,7 +214,7 @@ def load_all_sources(raw_dir: str) -> dict[str, dict]:
             records = filter_law_articles(hf_records, law_id, law_name)
             result[law_id] = {"name": law_name, "records": records, "source": "huggingface"}
         except ValueError as e:
-            logger.error(f"  ❌ Bỏ qua {law_id}: {e}")
+            logger.error(f"   Bỏ qua {law_id}: {e}")
 
     # --- Tier 2: Local files ---
     logger.info("=" * 55)
@@ -224,7 +224,7 @@ def load_all_sources(raw_dir: str) -> dict[str, dict]:
     for filename, (law_id, law_name) in LOCAL_LAWS.items():
         filepath = os.path.join(raw_dir, filename)
         if not os.path.exists(filepath):
-            logger.debug(f"  ⏭️  Không có file: {filename} (bỏ qua)")
+            logger.debug(f"  ⏭  Không có file: {filename} (bỏ qua)")
             continue
         records = load_from_local_txt(filepath, law_id, law_name)
         if records:
@@ -236,7 +236,7 @@ def load_all_sources(raw_dir: str) -> dict[str, dict]:
 
     # --- Tổng kết ---
     logger.info("=" * 55)
-    logger.info(f"✅ Tổng: {len(result)} văn bản luật sẵn sàng")
+    logger.info(f" Tổng: {len(result)} văn bản luật sẵn sàng")
     for lid, info in result.items():
         logger.info(
             f"  [{info['source']:12s}] {lid:<22} "
@@ -337,6 +337,6 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
     sources = load_all_sources(_raw_dir)
 
-    print(f"\n✅ Loaded {len(sources)} laws:")
+    print(f"\n Loaded {len(sources)} laws:")
     for lid, info in sources.items():
         print(f"  {lid}: {info['name']} ({len(info['records'])} Điều) [{info['source']}]")

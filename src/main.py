@@ -192,18 +192,18 @@ def run_pipeline() -> None:
     start_time = datetime.now()
 
     print("=" * 65)
-    print("🏛️  VIET-CONTRACT AUDITOR – Phase 1 & 2 (Multi-Law Pipeline)")
+    print("  VIET-CONTRACT AUDITOR – Phase 1 & 2 (Multi-Law Pipeline)")
     print(f"    Thời gian: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 65)
 
     # ── EXTRACT ──────────────────────────────────────────────────────────
-    print("\n📥 EXTRACT: Tải tất cả nguồn dữ liệu...")
+    print("\n EXTRACT: Tải tất cả nguồn dữ liệu...")
     law_sources = load_all_sources(RAW_DIR)
     if not law_sources:
         logger.error("Không có nguồn dữ liệu nào – dừng pipeline.")
         sys.exit(1)
 
-    print(f"\n   ✅ {len(law_sources)} văn bản luật sẵn sàng:")
+    print(f"\n   {len(law_sources)} văn bản luật sẵn sàng:")
     for lid, info in law_sources.items():
         tier = "HF" if info["source"] == "huggingface" else "local"
         print(f"      [{tier}] {info['name']} ({len(info['records'])} Điều)")
@@ -219,7 +219,7 @@ def run_pipeline() -> None:
         source = info["source"]
 
         print(f"\n{'─'*65}")
-        print(f"📖 {law_name}  [{source}]")
+        print(f" {law_name}  [{source}]")
         print(f"{'─'*65}")
 
         # TRANSFORM 1: Reconstruct full text
@@ -229,15 +229,15 @@ def run_pipeline() -> None:
         if source == "huggingface":
             save_raw_document(full_text, RAW_DIR, law_name)
 
-        print(f"   ✅ {len(records)} Điều → {len(full_text):,} ký tự")
+        print(f"    {len(records)} Điều → {len(full_text):,} ký tự")
 
         # TRANSFORM 2: Semantic Chunking
-        print(f"   ✂️  Chunking...")
+        print(f"     Chunking...")
         chunks = chunker.chunk_document(law_name, full_text, law_id=law_id)
-        print(f"   ✅ {len(chunks)} chunks")
+        print(f"    {len(chunks)} chunks")
 
         if not chunks:
-            logger.warning(f"  ⚠️ {law_name}: Không tạo được chunk nào, bỏ qua.")
+            logger.warning(f"   {law_name}: Không tạo được chunk nào, bỏ qua.")
             continue
 
         all_chunks.extend(chunks)
@@ -249,7 +249,7 @@ def run_pipeline() -> None:
 
     # ── LOAD ─────────────────────────────────────────────────────────────
     print(f"\n{'─'*65}")
-    print("💾 LOAD: Serialize → JSON...")
+    print(" LOAD: Serialize → JSON...")
     chunks_dicts = chunks_to_dicts(all_chunks)
 
     pipeline_meta = {
@@ -263,7 +263,7 @@ def run_pipeline() -> None:
     }
 
     save_output(chunks_dicts, pipeline_meta)
-    print(f"   ✅ {OUTPUT_JSON}")
+    print(f"    {OUTPUT_JSON}")
 
     # ── STATISTICS ────────────────────────────────────────────────────────
     stats = print_statistics(all_chunks, per_law_stats)
@@ -273,7 +273,7 @@ def run_pipeline() -> None:
         json.dump(stats, f, ensure_ascii=False, indent=2)
 
     elapsed = (datetime.now() - start_time).total_seconds()
-    print(f"\n✅ Pipeline hoàn tất trong {elapsed:.1f}s")
+    print(f"\n Pipeline hoàn tất trong {elapsed:.1f}s")
 
 
 # ---------------------------------------------------------------------------
