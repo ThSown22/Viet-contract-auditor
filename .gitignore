@@ -28,3 +28,9 @@ Thumbs.db
 # Agent support docs
 CLAUDE.md
 Project_base_knowledge.md
+
+# Claude Code local settings (personal overrides, not for sharing)
+.claude/settings.local.json
+
+# Scratch / test files
+sample_contract.txt
