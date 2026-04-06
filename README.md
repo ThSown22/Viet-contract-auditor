@@ -207,6 +207,35 @@ Kết quả mong đợi khi thành công:
 - Log hoàn tất import vectors cho 3 namespace.
 - Dòng kết thúc: `Offline storage migration completed successfully (no LLM API calls).`
 
+### 5.4 Kiểm tra storage layer
+
+Sau khi migrate, chạy script kiểm tra để đảm bảo dữ liệu đã vào đúng mỗi backend:
+
+```bash
+uv run python src/check_storage.py
+```
+
+Kết quả mong đợi:
+
+```
+PostgreSQL: healthy
+  Total records: 6594
+
+Neo4j: healthy
+  Nodes: 2138, Edges: 2754
+
+Qdrant: healthy
+  Total points: 5150
+
+✓ All storage layers are healthy!
+```
+
+Script này sẽ:
+- Truy vấn tất cả bảng trong PostgreSQL, đếm records.
+- Kiểm tra node/edge trong Neo4j.
+- Liệt kê collections và point count trong Qdrant.
+- Xuất `storage_health_check.json` để lưu trữ lịch sử kiểm tra.
+
 ## 6. Biến môi trường chính
 
 Thiết lập trong `.env` (không commit file thật lên git):
