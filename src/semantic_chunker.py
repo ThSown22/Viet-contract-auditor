@@ -320,7 +320,7 @@ class VietnameseLegalChunker:
             segments.append(text[start:end].strip())
 
         # Gộp các Khoản thành sub-chunks đạt kích thước mục tiêu
-        sub_chunks: list[str] = []
+        sub_chunks: list[str] = []  
         current_group: list[str] = []
         current_len = len(header)
 
@@ -337,7 +337,7 @@ class VietnameseLegalChunker:
                 current_group.append(segment)
                 current_len += seg_len
 
-        # Phần còn lại
+        
         if current_group:
             chunk_text = header + "\n" + "\n".join(current_group)
             sub_chunks.append(chunk_text.strip())

@@ -141,7 +141,7 @@ def print_statistics(all_chunks: list[LegalChunk], per_law: list[dict]) -> dict:
     with_overlap = sum(1 for c in all_chunks if c.has_overlap)
 
     print("\n" + "=" * 65)
-    print("📊  THỐNG KÊ CHUNKING – TỔNG HỢP")
+    print(" THỐNG KÊ CHUNKING – TỔNG HỢP")
     print("=" * 65)
     print(f"  {'Văn bản':<35} {'#Chunks':>7} {'AvgTok':>7} {'InRange':>8}")
     print(f"  {'-'*60}")
