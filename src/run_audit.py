@@ -2,15 +2,16 @@
 
 Usage:
     uv run python src/run_audit.py contract.txt
+    uv run python src/run_audit.py contract.docx
     uv run python src/run_audit.py contract.txt --output report.md
     uv run python src/run_audit.py contract.txt --verbose
 
-Currently accepts .txt files only.
-TODO (Phase 5): add PDF support (pdfplumber) and .docx support (python-docx).
+Supported input formats: .txt, .docx
+.doc files are not supported — convert to .docx first.
 
 Exit codes:
     0 — success
-    1 — input file not found or unreadable
+    1 — input file not found, unreadable, or unsupported format
     2 — pipeline error (state["error"] is set)
 """
 
@@ -68,7 +69,7 @@ def _parse_args() -> argparse.Namespace:
         prog="run_audit",
         description="Viet-Contract Auditor — Phase 4 LangGraph pipeline",
     )
-    parser.add_argument("contract", type=Path, help="Path to contract file (.txt)")
+    parser.add_argument("contract", type=Path, help="Path to contract file (.txt or .docx)")
     parser.add_argument(
         "--output", "-o",
         type=Path,
@@ -91,14 +92,22 @@ async def _main(contract_path: Path, output_path: Path | None, verbose: bool) ->
         logger.error("Contract file not found: %s", contract_path)
         return 1
 
-    if contract_path.suffix.lower() not in {".txt"}:
-        logger.warning(
-            "Only .txt files are fully supported in Phase 4. "
-            "PDF/DOCX support is planned for Phase 5. Attempting to read as UTF-8 text."
+    suffix = contract_path.suffix.lower()
+
+    if suffix == ".doc":
+        logger.error(
+            "Legacy .doc format is not supported. Convert to .docx first "
+            "(File → Save As → Word Document .docx in Microsoft Word)."
         )
+        return 1
 
     try:
-        contract_text = contract_path.read_text(encoding="utf-8")
+        if suffix == ".docx":
+            import docx  # python-docx; install with: uv add python-docx
+            doc = docx.Document(str(contract_path))
+            contract_text = "\n".join(p.text for p in doc.paragraphs)
+        else:
+            contract_text = contract_path.read_text(encoding="utf-8")
     except Exception as exc:
         logger.error("Failed to read contract file: %s", exc)
         return 1

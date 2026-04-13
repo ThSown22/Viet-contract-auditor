@@ -1,71 +1,145 @@
-"""LightRAG production client — STUB implementation.
+"""LightRAG production client.
 
-# TODO: replace stub functions with real implementation when OPENAI_API_KEY is available.
-#
-# Real implementation notes (see init_storage.py:_build_rag() lines 261-296 as template):
-#
-#   from functools import partial
-#   from lightrag import LightRAG
-#   from lightrag.llm.openai import gpt_4o_mini_complete, openai_embed
-#   from lightrag.utils import EmbeddingFunc
-#   from lightrag.base import QueryParam
-#
-#   embed_func = EmbeddingFunc(
-#       embedding_dim=384,           # matches stored Qdrant vectors (indexed with MiniLM-L12-v2)
-#       func=partial(openai_embed.func, model="text-embedding-3-small"),
-#       max_token_size=8192,
-#       send_dimensions=True,        # passes dimensions=384 to OpenAI API (Matryoshka truncation)
-#   )
-#
-#   rag = LightRAG(
-#       working_dir=os.getenv("LIGHTRAG_WORKING_DIR", "./lightrag_index"),
-#       workspace=os.getenv("WORKSPACE", "viet_contract_prod"),
-#       kv_storage="PGKVStorage",
-#       doc_status_storage="PGDocStatusStorage",
-#       graph_storage="Neo4JStorage",
-#       vector_storage="QdrantVectorDBStorage",
-#       llm_model_func=gpt_4o_mini_complete,
-#       embedding_func=embed_func,
-#   )
-#   await rag.initialize_storages()
-#
-#   Smoke test: embed = await embed_func(["test"]); assert embed.shape[1] == 384
+LLM:        Cerebras qwen-3-235b via OpenAI-compatible endpoint (CEREBRAS_API_KEY)
+Embeddings: sentence-transformers paraphrase-multilingual-MiniLM-L12-v2 (dim=384, local)
+Storage:    Neo4j + Qdrant + PostgreSQL (credentials from .env)
+
+Singleton: get_rag_client() initialises once and caches behind asyncio.Lock.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
+_MODEL = "qwen-3-235b-a22b-instruct-2507"
+_EMBED_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
+_EMBED_DIM = 384
+
+_rag_instance = None
+_rag_lock: asyncio.Lock | None = None
+
+
+def _get_lock() -> asyncio.Lock:
+    """Lazy-create the lock inside a running event loop (Python 3.10+ safe)."""
+    global _rag_lock
+    if _rag_lock is None:
+        _rag_lock = asyncio.Lock()
+    return _rag_lock
+
+
+async def _cerebras_llm(
+    prompt: str,
+    system_prompt: str | None = None,
+    history_messages: list | None = None,
+    enable_cot: bool = False,
+    keyword_extraction: bool = False,
+    **kwargs,
+) -> str:
+    """LightRAG-compatible llm_model_func backed by Cerebras via openai_complete_if_cache.
+
+    Inherits tenacity retry logic (RateLimitError, APIConnectionError, APITimeoutError).
+    """
+    from lightrag.llm.openai import openai_complete_if_cache
+
+    return await openai_complete_if_cache(
+        _MODEL,
+        prompt,
+        system_prompt=system_prompt,
+        history_messages=history_messages or [],
+        enable_cot=enable_cot,
+        keyword_extraction=keyword_extraction,
+        base_url="https://api.cerebras.ai/v1",
+        api_key=os.getenv("CEREBRAS_API_KEY"),
+        **kwargs,
+    )
+
 
 async def get_rag_client():
-    """Return the shared LightRAG client (singleton).
+    """Return the shared LightRAG client (singleton, initialises on first call).
 
-    # TODO: replace with real implementation:
-    #   - Load .env credentials (OPENAI_API_KEY, NEO4J_*, QDRANT_*, POSTGRES_*)
-    #   - Initialize LightRAG with production storage backends
-    #   - Run embedding smoke test (assert dim == 384)
-    #   - Cache in module-level _rag_instance with asyncio.Lock
+    Initialisation steps:
+      1. Load sentence-transformers model (MiniLM-L12-v2, 384 dim)
+      2. Run embedding smoke test (assert shape == (1, 384))
+      3. Build LightRAG with production storage backends
+      4. Call rag.initialize_storages()
     """
-    logger.warning("STUB: get_rag_client() — returning None, no storage connection")
-    return None
+    global _rag_instance
+    lock = _get_lock()
+    async with lock:
+        if _rag_instance is not None:
+            return _rag_instance
+
+        logger.info(
+            "Initialising LightRAG client (%s + Cerebras + Neo4j/Qdrant/PG)...",
+            _EMBED_MODEL_NAME,
+        )
+
+        # --- local embedding model ---
+        from sentence_transformers import SentenceTransformer
+        _st_model = SentenceTransformer(_EMBED_MODEL_NAME)
+
+        async def _embed(texts: list[str], **_kw) -> np.ndarray:
+            vecs = _st_model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
+            return np.array(vecs, dtype=np.float32)
+
+        import importlib
+        EmbeddingFunc = importlib.import_module("lightrag.utils").EmbeddingFunc
+
+        embed_func = EmbeddingFunc(
+            embedding_dim=_EMBED_DIM,
+            func=_embed,
+            max_token_size=8192,
+            model_name=_EMBED_MODEL_NAME,
+        )
+
+        # smoke test
+        test = await embed_func(["kiểm tra kết nối"])
+        assert test.shape == (1, _EMBED_DIM), f"Embedding shape mismatch: {test.shape}"
+        logger.info("Embedding smoke test passed: shape=%s", test.shape)
+
+        # --- LightRAG with production backends ---
+        LightRAG = importlib.import_module("lightrag").LightRAG
+
+        rag = LightRAG(
+            working_dir=os.getenv("LIGHTRAG_WORKING_DIR", "./lightrag_index"),
+            workspace=os.getenv("WORKSPACE", "viet_contract_prod"),
+            kv_storage="PGKVStorage",
+            doc_status_storage="PGDocStatusStorage",
+            graph_storage="Neo4JStorage",
+            vector_storage="QdrantVectorDBStorage",
+            llm_model_func=_cerebras_llm,
+            embedding_func=embed_func,
+        )
+        await rag.initialize_storages()
+
+        _rag_instance = rag
+        logger.info("LightRAG client ready (Neo4j + Qdrant + PostgreSQL)")
+        return _rag_instance
 
 
 async def query_hybrid(rag, clause_text: str, top_k: int = 10) -> str:
     """Query LightRAG in hybrid mode (Neo4j graph + Qdrant vector + PG KV).
 
-    # TODO: replace with real implementation:
-    #   from lightrag.base import QueryParam
-    #   return await rag.aquery(
-    #       clause_text,
-    #       param=QueryParam(mode="hybrid", top_k=top_k, only_need_context=True),
-    #   )
+    Falls back to STUB message when rag is None (storage not connected).
     """
-    logger.warning("STUB: query_hybrid() — returning placeholder context")
-    preview = clause_text[:80].replace("\n", " ")
-    return (
-        f"[STUB] Chưa có dữ liệu pháp lý thực.\n"
-        f"Cần OPENAI_API_KEY và kết nối storage để truy vấn LightRAG.\n"
-        f"Điều khoản: {preview}..."
+    if rag is None:
+        logger.warning("STUB: query_hybrid() — returning placeholder context")
+        preview = clause_text[:80].replace("\n", " ")
+        return (
+            f"[STUB] Chưa có dữ liệu pháp lý thực.\n"
+            f"Cần kết nối storage để truy vấn LightRAG.\n"
+            f"Điều khoản: {preview}..."
+        )
+
+    from lightrag.base import QueryParam
+
+    return await rag.aquery(
+        clause_text,
+        param=QueryParam(mode="hybrid", top_k=top_k, only_need_context=True),
     )

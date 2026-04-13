@@ -5,23 +5,32 @@ Outputs: AuditState.contract_domain, AuditState.chunks
 
 Classification logic:
   1. Keyword-based (pure regex, no API call)
-  2. Stub fallback when keywords are ambiguous: default to "Thương mại" + log warning
-     # TODO: replace stub with gpt-4o-mini call using ROUTER_SYSTEM_PROMPT
+  2. LLM fallback when keywords are ambiguous: Cerebras qwen-3-235b call
 
 Clause splitting logic:
   1. Pure-regex split at Điều boundaries
-  2. If < 3 clauses found: keep as-is + log warning
-     # TODO: replace stub fallback with gpt-4o-mini call using CLAUSE_SPLIT_SYSTEM_PROMPT
+  2. If < 3 clauses found: LLM fallback using CLAUSE_SPLIT_SYSTEM_PROMPT
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+
+from openai import AsyncOpenAI
 
 from core.legal_patterns import classify_domain_by_keywords, split_contract_into_clauses
+from core.prompts import CLAUSE_SPLIT_SYSTEM_PROMPT, ROUTER_SYSTEM_PROMPT
 from core.state import AuditState
 
 logger = logging.getLogger(__name__)
+
+_MODEL = "qwen-3-235b-a22b-instruct-2507"
+_cerebras = AsyncOpenAI(
+    api_key=os.getenv("CEREBRAS_API_KEY"),
+    base_url="https://api.cerebras.ai/v1",
+)
 
 
 async def router_node(state: AuditState) -> dict:
@@ -40,26 +49,21 @@ async def router_node(state: AuditState) -> dict:
     domain = classify_domain_by_keywords(contract_text)
 
     if domain is None:
-        # TODO: replace stub with gpt-4o-mini API call:
-        #   from openai import AsyncOpenAI
-        #   import json
-        #   from core.prompts import ROUTER_SYSTEM_PROMPT
-        #   client = AsyncOpenAI()
-        #   try:
-        #       response = await client.chat.completions.create(
-        #           model="gpt-4o-mini",
-        #           messages=[
-        #               {"role": "system", "content": ROUTER_SYSTEM_PROMPT},
-        #               {"role": "user", "content": contract_text[:8000]},
-        #           ],
-        #       )
-        #       result = json.loads(response.choices[0].message.content)
-        #       domain = result.get("domain", "Thương mại")
-        #   except Exception as exc:
-        #       logger.error("router_agent: LLM classification failed: %s", exc)
-        #       domain = "Thương mại"
-        logger.warning("STUB: router_agent — domain unclear from keywords, defaulting to 'Thương mại'")
-        domain = "Thương mại"
+        logger.info("router_agent: keyword classification inconclusive, calling LLM")
+        try:
+            response = await _cerebras.chat.completions.create(
+                model=_MODEL,
+                messages=[
+                    {"role": "system", "content": ROUTER_SYSTEM_PROMPT},
+                    {"role": "user", "content": contract_text[:8000]},
+                ],
+            )
+            result = json.loads(response.choices[0].message.content)
+            domain = result.get("domain", "Thương mại")
+            logger.info("router_agent: LLM domain=%s reason=%s", domain, result.get("reason", ""))
+        except Exception as exc:
+            logger.error("router_agent: LLM classification failed: %s", exc)
+            domain = "Thương mại"
 
     logger.info("router_agent: domain=%s", domain)
 
@@ -67,10 +71,24 @@ async def router_node(state: AuditState) -> dict:
     chunks = split_contract_into_clauses(contract_text)
 
     if len(chunks) < 3:
-        # TODO: replace stub fallback with gpt-4o-mini call using CLAUSE_SPLIT_SYSTEM_PROMPT
-        logger.warning(
-            "STUB: router_agent — only %d clause(s) found by regex, using as-is", len(chunks)
+        logger.info(
+            "router_agent: only %d clause(s) from regex, calling LLM clause splitter", len(chunks)
         )
+        try:
+            response = await _cerebras.chat.completions.create(
+                model=_MODEL,
+                messages=[
+                    {"role": "system", "content": CLAUSE_SPLIT_SYSTEM_PROMPT},
+                    {"role": "user", "content": contract_text[:8000]},
+                ],
+            )
+            result = json.loads(response.choices[0].message.content)
+            llm_chunks = result.get("clauses", [])
+            if llm_chunks:
+                chunks = llm_chunks
+                logger.info("router_agent: LLM produced %d clause(s)", len(chunks))
+        except Exception as exc:
+            logger.warning("router_agent: LLM clause split failed: %s", exc)
 
     logger.info("router_agent: %d clause(s)", len(chunks))
     return {"contract_domain": domain, "chunks": chunks}

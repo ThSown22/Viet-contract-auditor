@@ -3,16 +3,17 @@
 Inputs:  AuditState.chunks, AuditState.contract_domain
 Outputs: AuditState.legal_context
 
-# TODO: replace stub with real LightRAG hybrid queries when OPENAI_API_KEY is available:
-#   - asyncio.gather with semaphore (max 3 concurrent) over chunks
-#   - query_hybrid(rag, clause_text, top_k=10) per clause
-#   - Trim each result to max 3000 chars to avoid downstream token overflow
-#   - Deduplicate passages by hashing the first 100 chars of each paragraph
-#   - CRITICAL: reads from production storage ONLY — never from lightrag_index/ JSON files
+Queries LightRAG hybrid (Neo4j graph + Qdrant vector + PG KV) for each clause.
+Semaphore(3) caps concurrent queries.
+Deduplicates passages by MD5 of first 100 chars.
+Caps each result to 3000 chars to avoid downstream token overflow.
+Reads from production storage only — never from lightrag_index/ JSON files.
 """
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import logging
 
 from core.lightrag_client import get_rag_client, query_hybrid
@@ -29,38 +30,35 @@ async def retrieval_node(state: AuditState) -> dict:
         logger.warning("retrieval_agent: no chunks to retrieve for")
         return {"legal_context": ""}
 
-    # TODO: replace with real implementation:
-    #   import asyncio, hashlib
-    #   rag = await get_rag_client()
-    #   sem = asyncio.Semaphore(3)
-    #   async def _query(clause: str) -> str:
-    #       async with sem:
-    #           try:
-    #               result = await query_hybrid(rag, clause, top_k=10)
-    #               return result[:3000]  # cap to avoid token overflow
-    #           except Exception as exc:
-    #               logger.warning("retrieval_agent: query failed for clause: %s", exc)
-    #               return ""
-    #   raw_results = await asyncio.gather(*[_query(c) for c in chunks])
-    #   # Deduplicate passages
-    #   seen: set[str] = set()
-    #   sections = []
-    #   for i, (chunk, result) in enumerate(zip(chunks, raw_results), 1):
-    #       if result:
-    #           key = hashlib.md5(result[:100].encode()).hexdigest()
-    #           if key not in seen:
-    #               seen.add(key)
-    #               sections.append(f"### Điều khoản {i}\n{result}\n")
-    #   legal_context = "\n".join(sections)
+    rag = await get_rag_client()
+    sem = asyncio.Semaphore(3)
 
-    logger.warning("STUB: retrieval_agent — returning placeholder legal_context for %d clause(s)", len(chunks))
+    async def _query(clause: str) -> str:
+        async with sem:
+            try:
+                result = await query_hybrid(rag, clause, top_k=5)
+                return (result or "")[:1000]
+            except Exception as exc:
+                logger.warning("retrieval_agent: query failed: %s", exc)
+                return ""
 
+    raw_results = await asyncio.gather(*[_query(c) for c in chunks])
+
+    seen: set[str] = set()
     sections: list[str] = []
-    for i, chunk in enumerate(chunks, 1):
-        stub_result = await query_hybrid(None, chunk)
-        preview = chunk[:60].replace("\n", " ")
-        sections.append(f"### Điều khoản {i}: {preview}...\n{stub_result}\n")
+    for i, (chunk, result) in enumerate(zip(chunks, raw_results), 1):
+        if result:
+            key = hashlib.md5(result[:100].encode()).hexdigest()
+            if key not in seen:
+                seen.add(key)
+                sections.append(f"### Điều khoản {i}\n{result}\n")
 
     legal_context = "\n".join(sections)
-    logger.info("retrieval_agent: assembled legal_context (%d chars)", len(legal_context))
+    logger.info(
+        "retrieval_agent: %d/%d clauses with context, %d unique sections, %d total chars",
+        sum(1 for r in raw_results if r),
+        len(chunks),
+        len(sections),
+        len(legal_context),
+    )
     return {"legal_context": legal_context}

@@ -4,19 +4,29 @@ Inputs:  AuditState.audit_findings, AuditState.contract_domain, AuditState.confi
 Outputs: AuditState.final_report
 
 Two paths:
-  - confidence_score >= 0.3: call gpt-4o-mini with GENERATOR_SYSTEM_PROMPT
-    # TODO: replace stub with real LLM call when OPENAI_API_KEY is available
-  - confidence_score < 0.3: pure template formatter (always active in stub mode)
+  - confidence_score >= 0.3: Cerebras qwen-3-235b call with GENERATOR_SYSTEM_PROMPT
+  - confidence_score < 0.3: pure template formatter (no LLM call)
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 from datetime import datetime, timezone
 
+from openai import AsyncOpenAI
+
+from core.prompts import GENERATOR_SYSTEM_PROMPT
 from core.state import AuditState
 
 logger = logging.getLogger(__name__)
+
+_MODEL = "qwen-3-235b-a22b-instruct-2507"
+_cerebras = AsyncOpenAI(
+    api_key=os.getenv("CEREBRAS_API_KEY"),
+    base_url="https://api.cerebras.ai/v1",
+)
 
 
 def _template_report(state: AuditState) -> str:
@@ -92,31 +102,26 @@ async def generator_node(state: AuditState) -> dict:
     error = state.get("error")
 
     if confidence >= 0.3 and findings and not error:
-        # TODO: replace with gpt-4o-mini call when OPENAI_API_KEY is available:
-        #   import json
-        #   from openai import AsyncOpenAI
-        #   from core.prompts import GENERATOR_SYSTEM_PROMPT
-        #   client = AsyncOpenAI()
-        #   try:
-        #       response = await client.chat.completions.create(
-        #           model="gpt-4o-mini",
-        #           messages=[{
-        #               "role": "user",
-        #               "content": GENERATOR_SYSTEM_PROMPT.format(
-        #                   domain=domain,
-        #                   findings_json=json.dumps(findings, ensure_ascii=False, indent=2),
-        #               ),
-        #           }],
-        #       )
-        #       report = response.choices[0].message.content
-        #       return {"final_report": report}
-        #   except Exception as exc:
-        #       logger.error("generator_agent: LLM call failed: %s", exc)
-        #       # fall through to template
-        pass
+        try:
+            response = await _cerebras.chat.completions.create(
+                model=_MODEL,
+                messages=[{
+                    "role": "user",
+                    "content": GENERATOR_SYSTEM_PROMPT.format(
+                        domain=domain,
+                        findings_json=json.dumps(findings, ensure_ascii=False, indent=2),
+                    ),
+                }],
+            )
+            report = response.choices[0].message.content
+            logger.info("generator_agent: LLM report generated (%d chars)", len(report))
+            return {"final_report": report}
+        except Exception as exc:
+            logger.error("generator_agent: LLM call failed: %s", exc)
+            # fall through to template
 
     logger.warning(
-        "STUB: generator_agent — template formatter (confidence=%.2f)", confidence
+        "generator_agent: using template formatter (confidence=%.2f)", confidence
     )
     report = _template_report(state)
     logger.info("generator_agent: report generated (%d chars)", len(report))
