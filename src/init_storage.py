@@ -118,7 +118,7 @@ def _build_dummy_embedding_func(embedding_dim: int) -> Any:
         embedding_dim=embedding_dim,
         func=_embed,
         max_token_size=8192,
-        model_name="offline-import-embedding",
+        model_name="paraphrase-multilingual-MiniLM-L12-v2",
     )
 
 
