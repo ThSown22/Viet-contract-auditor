@@ -1,0 +1,52 @@
+{
+  "default": {
+    "source_id": "generic_law",
+    "prefer_browser": false,
+    "wait_for": null,
+    "published_at_hints": [
+      "dc.date.issued",
+      "article:published_time",
+      "og:published_time",
+      "publishdate",
+      "pubdate",
+      "date",
+      "datepublished",
+      "publishdate"
+    ]
+  },
+  "sources": {
+    "vbpl.vn": {
+      "source_id": "vbpl",
+      "prefer_browser": false,
+      "published_at_priority": [
+        "dc.date.issued" 
+      ]
+    },
+    "thuvienphapluat.vn": {
+      "source_id": "tvpl",
+      "prefer_browser": true,
+      "wait_for": "css:.content-html",
+      "published_at_priority": [
+        "article:published_time" 
+      ],
+      "skip_published_at_meta_keys": [
+        "og:published_time" 
+      ]
+    },
+    "congbao.chinhphu.vn": {
+      "source_id": "congbao",
+      "prefer_browser": false,
+      "published_at_hints": [
+        "datepublished"
+      ]
+    },
+    "luatvietnam.vn": {
+      "source_id": "luatvn",
+      "prefer_browser": true,
+      "wait_for": "css:.content-law",
+      "published_at_hints": [
+        "publishdate"
+      ]
+    }
+  }
+}
