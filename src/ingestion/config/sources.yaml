@@ -1,0 +1,51 @@
+# FILE: src/ingestion/config/sources.yaml
+
+# Cấu hình mặc định áp dụng cho tất cả các nguồn
+default:
+  source_id: "generic_law"
+  prefer_browser: false
+  timeout: 30
+  retry_limit: 3
+  headers:
+    User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    Accept-Language: "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7"
+  output_schema:
+    law_id: "unknown"
+    title: "unknown"
+    published_at: null
+    effective_at: null
+    status: "Đang cập nhật"
+    content: ""
+
+# Cấu hình chi tiết cho từng trang web
+sources:
+  thuvienphapluat.vn:
+    source_id: "tvpl"
+    prefer_browser: true
+    wait_for: ".content1"
+    metadata_extractors:
+      title_selector: "title"
+      law_id_regex: 'Luật số:?\s*([\d/QH-]+)'
+    text_extractors:
+      target_selector: ".content1"
+      rules:
+        published_at: 'ngày\s*(\d{1,2})\s*tháng\s*(\d{1,2})\s*năm\s*(\d{4})'
+        effective_at: 'có hiệu lực thi hành từ ngày\s*(\d{1,2})\s*tháng\s*(\d{1,2})\s*năm\s*(\d{4})'
+    content_selector: ".content1"
+
+  congbao.chinhphu.vn:
+    source_id: "congbao"
+    prefer_browser: false
+    metadata_extractors:
+      title_selector: "h1.title"
+      law_id_regex: 'Luật số\s*([^\s,]+)'
+    text_extractors:
+      target_selector: ".box-section--main span.text"
+      rules:
+        published_at: 'Ban hành:\s*(\d{2}/\d{2}/\d{4})'
+        effective_at: 'Hiệu lực:\s*(\d{2}/\d{2}/\d{4})'
+    file_extractors:
+      target_selector: ".box-option-right .list--open"
+      link_selector: "a.item-open"
+      filter: ".pdf"
+    content_selector: "#pdf-container"

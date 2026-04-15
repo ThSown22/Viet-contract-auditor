@@ -1,0 +1,46 @@
+# Cấu hình tìm kiếm thông minh
+
+# 1. Cấu hình quét nguồn chính thống
+discovery_settings:
+  engine: "serper"
+  max_results_per_query: 5
+  # Ưu tiên thứ tự nguồn để xử lý trùng lặp sau này
+  source_priority: ["tvpl", "congbao"]
+  target_domains:
+    - "thuvienphapluat.vn"
+    - "congbao.chinhphu.vn"
+
+# 2. Định nghĩa các "Thực thể Luật" cần theo dõi
+# Ta dùng Tên thay vì ID để Bot luôn tìm được bản mới nhất
+target_laws:
+  - name: "Bộ luật Dân sự"
+    keywords: ["Bộ luật dân sự 2015", "Văn bản hợp nhất bộ luật dân sự"]
+  - name: "Luật Doanh nghiệp"
+    keywords: ["Luật doanh nghiệp 2020", "Văn bản hợp nhất luật doanh nghiệp"]
+  - name: "Luật Trọng tài thương mại"
+    keywords: ["Luật trọng tài thương mại 2010", "Văn bản hợp nhất luật trọng tài thương mại"]
+
+# 3. Mẫu câu truy vấn (Đã khóa Domain để giảm nhiễu)
+query_templates:
+  - id: "search_latest_version"
+    # Thêm toán tử OR site để chỉ lấy từ 2 nguồn này ngay từ Google
+    template: "Toàn văn {law_name} mới nhất site:thuvienphapluat.vn OR site:congbao.chinhphu.vn"
+    priority: 1
+  
+  - id: "search_amendments"
+    template: "Văn bản hợp nhất {law_name} site:thuvienphapluat.vn"
+    priority: 1
+
+# 4. Cấu hình lưu trữ và Khử trùng (Chuẩn Enterprise)
+storage:
+  output_dir: "data/ingestion/discovery_results"
+  filename_format: "discovered_{timestamp}.jsonl"
+  deduplication:
+    method: "content_hash" # Thay vì url_only
+    fields: ["title", "law_id", "effective_date"] # "Vân tay" của văn bản luật
+    scope: "global"
+
+# 5. Cơ chế chạy tiếp (Resume)
+resume_logic:
+  skip_if_processed: true
+  refresh_interval_days: 7 # Luật không đổi theo giờ, 1 tuần check 1 lần là đủ
