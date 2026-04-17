@@ -93,7 +93,7 @@ class DiscoveryRunner:
                 logger.info(f"Đã lưu thêm {len(valid_records)} link mới vào {self.output_file}")
 
     def run(self):
-        logger.info(" BẮT ĐẦU PIPELINE DISCOVERY ĐA LUỒNG (DE VERSION)...")
+        logger.info(" BẮT ĐẦU PIPELINE DISCOVERY ĐA LUỒNG ...")
         
         target_laws = self.config.get("target_laws", [])
         query_templates = self.config.get("query_templates", [])
@@ -105,7 +105,7 @@ class DiscoveryRunner:
                 query = template["template"].replace("{law_name}", law["name"])
                 tasks.append(query)
 
-        # CHẠY ĐA LUỒNG
+        # Chạy đa luồng để xử lý các query song song
         total_discovered = 0
         with ThreadPoolExecutor(max_workers=5) as executor:
             future_to_query = {executor.submit(self.engine.search, q): q for q in tasks}
@@ -118,9 +118,9 @@ class DiscoveryRunner:
                         self._save_results(results)
                         total_discovered += len(results)
                 except Exception as e:
-                    logger.error(f"❌ Lỗi khi xử lý query '{query}': {e}", exc_info=True)
+                    logger.error(f" Lỗi khi xử lý query '{query}': {e}", exc_info=True)
 
-        logger.info(f"🏁 PIPELINE HOÀN TẤT. Tổng cộng nhặt được {total_discovered} link.")
+        logger.info(f" PIPELINE HOÀN TẤT. Tổng cộng nhặt được {total_discovered} link.")
 
 if __name__ == "__main__":
     runner = DiscoveryRunner()
