@@ -10,9 +10,17 @@ build/
 .venv/
 venv/
 
+# Security / Environment variables
+.env
+.env.*
+!.env.example
+
 # Data (quá lớn cho git)
-data/raw/
-data/processed/*.json
+data/
+# Giữ cấu trúc folder data nhưng bỏ qua file:
+!data/.gitkeep
+
+logs/
 
 # IDE
 .vscode/
