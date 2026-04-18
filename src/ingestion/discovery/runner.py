@@ -3,6 +3,7 @@ import yaml
 import hashlib
 import jsonlines
 import logging
+import glob
 import threading # <-- Cần thiết để khóa luồng khi ghi file
 from datetime import datetime
 from typing import List
@@ -56,6 +57,37 @@ class DiscoveryRunner:
         
         # Tập hợp các mã băm để khử trùng ngay lập tức (In-memory Dedupe)
         self.seen_hashes = set()
+        # Nạp lại lịch sử ngay khi vừa bật máy để tránh trùng lặp với các lần chạy trước
+        self._load_history_state()
+
+    def _load_history_state(self): 
+        """
+        Quét tất cả file .jsonl cũ trong output_dir để nạp lại các link đã biết.
+        """
+        logger.info(f" Đang kiểm tra lịch sử dữ liệu tại {self.output_dir}...")
+        
+        # Tìm tất cả file .jsonl (ví dụ: discovered_20260415_120000.jsonl)
+        history_files = glob.glob(os.path.join(self.output_dir, "*.jsonl"))
+        
+        count = 0
+        for file_path in history_files:
+            # Đừng đọc chính cái file mình chuẩn bị ghi (output_file)
+            if file_path == self.output_file:
+                continue
+                
+            try:
+                with jsonlines.open(file_path) as reader:
+                    for obj in reader:
+                        # Lấy title từ dict cũ để tạo hash
+                        title = obj.get("title", "")
+                        if title:
+                            h = hashlib.md5(title.strip().lower().encode('utf-8')).hexdigest()
+                            self.seen_hashes.add(h)
+                            count += 1
+            except Exception as e:
+                logger.warning(f" Không thể đọc file lịch sử {file_path}: {e}")
+        
+        logger.info(f" Đã nạp {count} bản ghi cũ. Discovery sẽ tự động bỏ qua chúng.")
 
     def _load_config(self) -> dict:
         with open(self.config_path, 'r', encoding='utf-8') as f:
