@@ -9,6 +9,23 @@ discovery_settings:
   target_domains:
     - "thuvienphapluat.vn"
     - "congbao.chinhphu.vn"
+  path_denylist:
+    - "/hoi-dap-phap-luat/"
+    - "/cong-dong-dan-luat/"
+    - "/ma-so-thue/"
+    - "/thu-tuc-phap-ly/"
+    - "/tu-van-phap-luat/"
+    - "/tin-tuc-phap-luat/"
+    - "/phap-luat-vo-tao/"
+    - "/phap-luat/"
+    - "/bai-viet/"
+    - "/tin-tuc/"
+    - "/tags.html"
+  # Allowlist: chỉ giữ URL có path bắt đầu bằng prefix này theo domain
+  # Dùng làm filter chính; denylist là lớp phòng thủ thứ hai
+  path_allowlist:
+    thuvienphapluat.vn: ["/van-ban/"]
+    congbao.chinhphu.vn: ["/van-ban/"]
 
 # 2. Cấu hình vận hành (Bổ sung để GoogleSerperEngine có đạn mà dùng)
 rate_limit:
@@ -18,11 +35,16 @@ rate_limit:
 # 3. Định nghĩa các "Thực thể Luật" cần theo dõi
 target_laws:
   - name: "Bộ luật Dân sự"
+    aliases: ["BLDS", "bộ luật dân sự 2015", "bộ luật dân sự", "luật dân sự", "bộ luật ds"]
     keywords: ["Bộ luật dân sự 2015", "Văn bản hợp nhất bộ luật dân sự"]
   - name: "Luật Doanh nghiệp"
+    aliases: ["LDN", "luật doanh nghiệp 2020", "luật doanh nghiệp", "luật dn"]
     keywords: ["Luật doanh nghiệp 2020", "Văn bản hợp nhất luật doanh nghiệp"]
   - name: "Luật Trọng tài thương mại"
+    aliases: ["LTTTM", "luật trọng tài thương mại 2010", "luật trọng tài thương mại", "luật tttm"]
     keywords: ["Luật trọng tài thương mại 2010", "Văn bản hợp nhất luật trọng tài thương mại"]
+
+# 3b. Path denylist da duoc chuyen vao discovery_settings phia tren
 
 # 4. Mẫu câu truy vấn (Đã khóa Domain để giảm nhiễu)
 query_templates:
@@ -40,8 +62,7 @@ storage:
   output_dir: "data/ingestion/discovery_results"
   filename_format: "discovered_{timestamp}.jsonl"
   deduplication:
-    method: "content_hash" # Thay vì url_only
-    fields: ["title", "law_id", "effective_date"] # "Vân tay" của văn bản luật
+    method: "url_only"
     scope: "global"
 
 # 6. Cơ chế chạy tiếp (Resume)
