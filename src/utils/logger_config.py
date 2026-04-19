@@ -26,7 +26,11 @@ def setup_global_logging(log_file_name="viet_contract.log"):
     console_handler.setFormatter(log_format)
 
     # 5. Cấu hình Logger gốc (Root Logger)
+    # Chỉ setup 1 lần — tránh nhân bản handler khi import nhiều lần trong cùng process
     root_logger = logging.getLogger()
+    if root_logger.handlers:
+        return 
+
     root_logger.setLevel(logging.INFO)
     root_logger.addHandler(file_handler)
     root_logger.addHandler(console_handler)
