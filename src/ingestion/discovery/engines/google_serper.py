@@ -1,68 +1,84 @@
+import logging
 import os
 import re
-import time
-import requests
 import threading
-import logging
-from typing import List, Optional
+import time
+import unicodedata
 from datetime import datetime
+from typing import List, Optional
 from urllib.parse import urlparse
+
+import requests
 from dotenv import load_dotenv
+
 from src.ingestion.schemas.models import DiscoveredLink
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Regex trích xuất số hiệu luật
+# Cover VBHN plus existing QH/ND and other government document formats.
 LAW_ID_PATTERN = re.compile(
-    r'(?:số\s*)?(\d{1,3}/\d{4}/[A-Z]{2}\d{2,4}(?:-[A-Z]{2})?|'  # QH13, NĐ-CP
-    r'\d{1,3}/\d{4}/[A-Z]{2}\d{2,4}(?:-[A-Z]{2})?|'                # without "số"
-    r'(?:Nghị\s+định|Luật|Nghị\t+định)\s+(?:số\s+)?(\d+/\d{4}/[A-Z]{2}-\d{1,2}))',
-    re.IGNORECASE
+    r"(?:so\s*)?("
+    r"\d{1,4}/VBHN-[A-Z]{2,6}"
+    r"|"
+    r"\d{1,3}/\d{4}/QH\d{1,2}"
+    r"|"
+    r"\d{1,3}/\d{4}/(?:ND|NĐ)-CP"
+    r"|"
+    r"\d{1,3}/\d{4}/[A-ZĐ]{2,4}(?:-[A-ZĐ]{2,4})?"
+    r")",
+    re.IGNORECASE,
 )
 
-# Alias mapping: config tvpl/congbao → domain thực tế
+MAX_RATE_LIMIT_RETRIES = 2
+
+# Config aliases -> canonical domains.
 SOURCE_ALIAS_MAP = {
     "tvpl": "thuvienphapluat.vn",
     "congbao": "congbao.chinhphu.vn",
 }
 
-# Patterns cross-law cần lọc (dùng cho bổ sung exact match)
+# Patterns used to filter out cross-law noise.
 CROSS_PATTERNS = {
-    "bộ luật dân sự": [
-        r'\b(thi\s*hành\s*án\s*dân\s*sự)\b',
-        r'\b(tố\s*tụng\s*dân\s*sự)\b',
-        r'\b(tố\s*dụng\s*dân\s*sự)\b',
-        r'\b(bộ\s*luật\s*tố\s*tụng)\b',
-        r'\b(luật\s*tố\s*tụng)\b',
-        r'\b(hình\s*sự)\b',
-        r'\b(hành\s*chính)\b',
-        r'\b(luật\s*lao\s*động)\b',
-        r'\b(đầu\s*tư)\b',
+    "bo luat dan su": [
+        r"\b(thi\s*hanh\s*an\s*dan\s*su)\b",
+        r"\b(to\s*tung\s*dan\s*su)\b",
+        r"\b(to\s*dung\s*dan\s*su)\b",
+        r"\b(bo\s*luat\s*to\s*tung)\b",
+        r"\b(luat\s*to\s*tung)\b",
+        r"\b(hinh\s*su)\b",
+        r"\b(hanh\s*chinh)\b",
+        r"\b(luat\s*lao\s*dong)\b",
+        r"\b(dau\s*tu)\b",
     ],
-    "luật doanh nghiệp": [
-        r'\b(luật\s*đầu\s*tư)\b',
-        r'\b(chứng\s*khoán)\b',
-        r'\b(sở\s*hữu\s*trí\s*tuệ)\b',
-        r'\b(cạnh\s*tranh)\b',
+    "luat doanh nghiep": [
+        r"\b(luat\s*dau\s*tu)\b",
+        r"\b(chung\s*khoan)\b",
+        r"\b(so\s*huu\s*tri\s*tue)\b",
+        r"\b(canh\s*tranh)\b",
     ],
-    "luật trọng tài thương mại": [
-        r'\b(trọng\s*tài\s*quốc\s*tế)\b',
-        r'\b(hoà\s*giải)\b',
-        r'\b(tố\s*tụng)\b',
+    "luat trong tai thuong mai": [
+        r"\b(trong\s*tai\s*quoc\s*te)\b",
+        r"\b(hoa\s*giai)\b",
+        r"\b(to\s*tung)\b",
     ],
 }
 
 
+def _normalize_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFD", value or "")
+    ascii_only = "".join(char for char in normalized if unicodedata.category(char) != "Mn")
+    return ascii_only.replace("đ", "d").replace("Đ", "D").lower()
+
+
 class GoogleSerperEngine:
     def __init__(self, config: dict):
-        # ── Multi-Key ──────────────────────────────────────────────────────────
         raw_keys = {
-            k: v for k, v in os.environ.items()
-            if k.startswith("SERPER_KEY_") and v.strip()
+            key: value for key, value in os.environ.items()
+            if key.startswith("SERPER_KEY_") and value.strip()
         }
-        self.api_keys = [raw_keys[k] for k in sorted(raw_keys.keys())]
+        self.api_keys = [raw_keys[key] for key in sorted(raw_keys.keys())]
 
         if not self.api_keys:
             single_key = os.getenv("SERPER_API_KEY")
@@ -72,7 +88,6 @@ class GoogleSerperEngine:
                 logger.critical("Khong tim thay bat ky API Key nao!")
                 raise ValueError("Thieu SERPER_API_KEY.")
 
-        # ── Config ────────────────────────────────────────────────────────────
         self.settings = config.get("discovery_settings", {})
         self.rate_limit = config.get("rate_limit", {})
         self.current_key_idx = 0
@@ -80,25 +95,28 @@ class GoogleSerperEngine:
         self.lock = threading.Lock()
         self.url = "https://google.serper.dev/search"
         self.source_priority = self.settings.get("source_priority", [])
-        # Path denylist cho bài viết/Q&A (lớp 2)
         self.path_denylist = self.settings.get("path_denylist", [])
-        # Path allowlist cho văn bản chính thức (lớp 1: /van-ban/)
+
         raw_allowlist = self.settings.get("path_allowlist", {})
-        # Chuẩn hóa: keys có thể có hoặc không có domain prefix, giá trị là list
         self.path_allowlist: dict[str, list[str]] = {}
         for domain, prefixes in raw_allowlist.items():
             canon = domain.lower().replace("www.", "")
             if isinstance(prefixes, list):
                 self.path_allowlist[canon] = prefixes
-        logger.info(f"GoogleSerperEngine da san sang: {len(self.api_keys)} keys, "
-                    f"priority={self.source_priority}, "
-                    f"allowlist={self.path_allowlist}, denylist={len(self.path_denylist)} paths.")
+
+        logger.info(
+            "GoogleSerperEngine da san sang: %s keys, priority=%s, allowlist=%s, denylist=%s paths.",
+            len(self.api_keys),
+            self.source_priority,
+            self.path_allowlist,
+            len(self.path_denylist),
+        )
 
     def _rotate_key(self):
         with self.lock:
             self.current_key_idx = (self.current_key_idx + 1) % len(self.api_keys)
             self.call_count = 0
-            logger.warning(f"Da xoay API Key. Hien dung Key so {self.current_key_idx + 1}")
+            logger.warning("Da xoay API Key. Hien dung Key so %s", self.current_key_idx + 1)
 
     def get_headers(self):
         limit = self.rate_limit.get("rotate_keys_every_n_calls", 100)
@@ -107,7 +125,7 @@ class GoogleSerperEngine:
         self.call_count += 1
         return {
             "X-API-KEY": self.api_keys[self.current_key_idx],
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
     def search(
@@ -116,18 +134,18 @@ class GoogleSerperEngine:
         query_id: str = "",
         target_law_name: str = "",
         target_law_aliases: list = None,
+        _retry_count: int = 0,
     ) -> List[DiscoveredLink]:
         """
-        Tim kiem va tra ve List[DiscoveredLink] da duoc loc.
-        Loc nhieu: cross-law, path denylist, sap xep theo source_priority.
+        Search Serper and return filtered discovery results.
+        Retries on 403/429 after rotating to the next key.
         """
         if target_law_aliases is None:
             target_law_aliases = []
 
-        # ── Domain Locking ───────────────────────────────────────────────────
         target_domains = self.settings.get("target_domains", [])
         if target_domains:
-            domain_filter = " OR ".join([f"site:{d}" for d in target_domains])
+            domain_filter = " OR ".join([f"site:{domain}" for domain in target_domains])
             search_query = f"{query} ({domain_filter})"
         else:
             search_query = query
@@ -136,18 +154,43 @@ class GoogleSerperEngine:
             "q": search_query,
             "gl": "vn",
             "hl": "vi",
-            "num": self.settings.get("max_results", 10)
+            "num": self.settings.get("max_results", 10),
         }
 
-        logger.info(f"Thuc hien tim kiem Google: '{query}'")
+        logger.info("Thuc hien tim kiem Google: '%s'", query)
         time.sleep(self.rate_limit.get("delay_between_queries_sec", 1))
 
         try:
             response = requests.post(self.url, headers=self.get_headers(), json=payload, timeout=30)
             if response.status_code in [403, 429]:
-                logger.error(f"API Key #{self.current_key_idx + 1} loi {response.status_code}.")
+                if _retry_count >= MAX_RATE_LIMIT_RETRIES:
+                    logger.error(
+                        "API Key #%s loi %s. Da dat gioi han retry cho query '%s'.",
+                        self.current_key_idx + 1,
+                        response.status_code,
+                        query,
+                    )
+                    return []
+
+                logger.warning(
+                    "API Key #%s hit limit %s. Rotating and retrying (%s/%s) cho query '%s'.",
+                    self.current_key_idx + 1,
+                    response.status_code,
+                    _retry_count + 1,
+                    MAX_RATE_LIMIT_RETRIES,
+                    query,
+                )
                 self._rotate_key()
-                return []
+                backoff_delay = self.rate_limit.get("delay_between_queries_sec", 2) * (2 ** _retry_count)
+                time.sleep(backoff_delay)
+                return self.search(
+                    query=query,
+                    query_id=query_id,
+                    target_law_name=target_law_name,
+                    target_law_aliases=target_law_aliases,
+                    _retry_count=_retry_count + 1,
+                )
+
             response.raise_for_status()
             data = response.json()
 
@@ -161,60 +204,58 @@ class GoogleSerperEngine:
                 snippet = item.get("snippet", "")
                 domain = self._extract_domain(link_url)
 
-                # ── Filter 0: Path allowlist (van-ban/ chinh thuc) ─────────────
                 if not self._is_official_document_url(link_url):
-                    logger.info(f"  [FILTERED] Not official doc path: '{title[:60]}'")
+                    logger.info("  [FILTERED] Not official doc path: '%s'", title[:60])
                     continue
 
-                # ── Filter 1: Path denylist (Q&A / bai viet) ─────────────────
                 if self._is_path_denied(link_url):
-                    logger.info(f"  [FILTERED] Path nhieu: '{title[:60]}'")
+                    logger.info("  [FILTERED] Path nhieu: '%s'", title[:60])
                     continue
 
-                # ── Filter 2: Cross-law / exact name match ───────────────────
                 if not self._is_target_law_match(title, snippet, target_law_name, target_law_aliases):
-                    logger.info(f"  [FILTERED] Khong match ten luat: '{title[:60]}'")
+                    logger.info("  [FILTERED] Khong match ten luat: '%s'", title[:60])
                     continue
 
-                # ── Extract metadata ───────────────────────────────────────────
                 law_id = self._extract_law_id(title, snippet)
                 effective_date = self._extract_effective_date(title, snippet)
 
-                discovered_links.append(DiscoveredLink(
-                    url=link_url,
-                    title=title,
-                    source_domain=domain,
-                    search_query=query,
-                    query_id=query_id,
-                    snippet=snippet,
-                    is_processed=False,
-                    law_id=law_id,
-                    effective_date=effective_date,
-                ))
+                discovered_links.append(
+                    DiscoveredLink(
+                        url=link_url,
+                        title=title,
+                        source_domain=domain,
+                        search_query=query,
+                        query_id=query_id,
+                        snippet=snippet,
+                        is_processed=False,
+                        law_id=law_id,
+                        effective_date=effective_date,
+                    )
+                )
 
-            # ── Sort by domain priority ───────────────────────────────────────
             if self.source_priority:
-                discovered_links.sort(key=lambda r: self._domain_priority(r.source_domain))
+                discovered_links.sort(key=lambda result: self._domain_priority(result.source_domain))
 
-            logger.info(f" Da tim {len(discovered_links)} ket qua cho: '{query}'")
+            logger.info(" Da tim %s ket qua cho: '%s'", len(discovered_links), query)
             return discovered_links
 
-        except Exception as e:
-            logger.error(f"Loi khi discovery: {str(e)}", exc_info=True)
+        except Exception as exc:
+            logger.error("Loi khi discovery: %s", str(exc), exc_info=True)
             return []
 
     def _is_official_document_url(self, url: str) -> bool:
         """
-        Filter lớp 1: chỉ giữ URL có path thuộc allowlist của domain đó.
-        Nếu allowlist trống → cho phép tất cả (backward compatible).
+        Keep URLs whose path matches the configured allowlist for that domain.
+        If no allowlist is configured, keep everything for backward compatibility.
         """
         if not self.path_allowlist:
             return True
+
         domain = self._extract_domain(url)
         allowed_prefixes = self.path_allowlist.get(domain, [])
         if not allowed_prefixes:
             return False
-        # Parse path riêng rồi mới so sánh prefix — KHÔNG dùng startswith trên full URL
+
         parsed_path = urlparse(url).path
         for prefix in allowed_prefixes:
             if parsed_path.startswith(prefix):
@@ -225,7 +266,6 @@ class GoogleSerperEngine:
         return urlparse(url).netloc.replace("www.", "")
 
     def _is_path_denied(self, url: str) -> bool:
-        """Loc URL chua path trong denylist (bai viet/Q&A khong phai van ban chinh thuc)."""
         if not self.path_denylist:
             return False
         for denied in self.path_denylist:
@@ -241,145 +281,133 @@ class GoogleSerperEngine:
         target_law_aliases: list,
     ) -> bool:
         """
-        Loc ket qua nhiễu bang Exact Name + Aliases matching.
-
-        Neu KHONG chua ten chinh thuc hoac aliases → loai (nhiễu cross-law).
-        Neu chua → giu lai.
-
-        Bo sung them cross-pattern regex de bat nhung bien the nhiễu
-        (thi hanh an dan su, to tung, ...) van bi loai.
+        Filter noise by exact law name and configured aliases.
         """
         if not target_law_name:
-            return True  # fallback: khong biet → giu
+            return True
 
-        combined = f"{title} {snippet}".lower()
-        target_lower = target_law_name.lower()
+        combined = _normalize_text(f"{title} {snippet}")
+        target_lower = _normalize_text(target_law_name)
 
-        # Check 1: exact ten chinh thuc
         if target_lower in combined:
             return True
 
-        # Check 2: aliases hop le
         for alias in target_law_aliases:
-            if alias.lower() in combined:
+            if _normalize_text(alias) in combined:
                 return True
 
-        # Check 3: cross-pattern (neu co) → neu gap thi LOẠI
         cross_patterns = CROSS_PATTERNS.get(target_lower, [])
         for pattern in cross_patterns:
             if re.search(pattern, combined, re.IGNORECASE):
-                return False  # nhiễu cross-law
+                return False
 
-        # Khong gap ten chinh thuc, aliases, hay cross-pattern
-        # → cham chan: tra ve False (loai) thay vi True (giu)
         return False
 
     def _extract_law_id(self, title: str, snippet: str) -> Optional[str]:
-        text = f"{title} {snippet}"
+        text = _normalize_text(f"{title} {snippet}")
         match = LAW_ID_PATTERN.search(text)
         if match:
-            for g in match.groups():
-                if g:
-                    return g.strip()
+            return match.group(1).strip().upper()
         return None
 
     def _extract_effective_date(self, title: str, snippet: str) -> Optional[str]:
         """
-        Trích xuất ngày có hiệu lực.
+        Extract the most useful effective date from title/snippet text.
 
         Priority:
-        1. "Hiệu lực:" / "Hiệu lực kể từ ngày" → lấy ngày theo sau nhãn (cho phép : / -)
-        2. "ngày DD tháng MM năm YYYY" (định dạng đầy đủ từ tiếng Việt)
-        3. Tách tại "ban hành", chỉ lấy phần sau
-        4. Fallback: match DD/MM/YYYY đầu tiên
-        5. Standalone year
+        1. "Hieu luc" labels.
+        2. Full Vietnamese day/month/year text.
+        3. Text after "Ban hanh".
+        4. First fallback DD/MM/YYYY.
+        5. Standalone year.
 
-        Year phải trong [2000, current_year+1]; 1900 là placeholder giả → block.
+        Years must be within [2000, current_year + 1]. Year 1900 is a known
+        placeholder from Congbao and must be blocked.
         """
-        text = f"{title} {snippet}"
+        text = _normalize_text(f"{title} {snippet}")
         current_year = datetime.now().year
 
-        def _parse_dmy(d: str, m: str, y: str) -> Optional[str]:
-            year = int(y)
-            if 2000 <= year <= current_year + 1:
-                return f"{year}-{m.zfill(2)}-{d.zfill(2)}"
+        def _parse_dmy(day: str, month: str, year_text: str) -> Optional[str]:
+            try:
+                year = int(year_text)
+                if year == 1900:
+                    return None
+                if 2000 <= year <= current_year + 1:
+                    return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+            except (TypeError, ValueError):
+                return None
             return None
 
-        def _parse_year(y: str) -> Optional[str]:
-            year = int(y)
+        def _parse_year(year_text: str) -> Optional[str]:
+            try:
+                year = int(year_text)
+            except (TypeError, ValueError):
+                return None
             if 2000 <= year <= current_year + 1:
                 return f"{year}-??-??"
             return None
 
-        # ── Priority 1: "Hiệu lực" có : / - / kể từ ─────────────────────────
-        # Cho phep: "Hiệu lực: 01/01/2026", "Hiệu lực 01/01/2026",
-        #           "Hiệu lực kể từ ngày 01/01/2026"
-        EFF_LABEL = re.compile(
-            r'hiệu\s*lực\s*(?:kể\s*từ\s*)?(?:ngày\s+)?[:\-\s]*'
-            r'(\d{1,2})\s*(?:tháng)?[\/\-\s]+(\d{1,2})\s*(?:năm)?[\/\-\s]+(\d{4})',
-            re.IGNORECASE
+        eff_label = re.compile(
+            r"hieu\s*luc\s*(?:ke\s*tu\s*)?(?:ngay\s+)?[:\-\s]*"
+            r"(\d{1,2})\s*(?:thang)?[\/\-\s]+(\d{1,2})\s*(?:nam)?[\/\-\s]+(\d{4})",
+            re.IGNORECASE,
         )
-        match = EFF_LABEL.search(text)
+        match = eff_label.search(text)
         if match:
             result = _parse_dmy(match.group(1), match.group(2), match.group(3))
             if result:
                 return result
 
-        # ── Priority 2: "ngày DD tháng MM năm YYYY" (tiếng Việt đầy đủ) ─────
-        DATE_VIET = re.compile(
-            r'ngày\s+(\d{1,2})\s+tháng\s+(\d{1,2})\s+năm\s+(\d{4})',
-            re.IGNORECASE
+        date_viet = re.compile(
+            r"ngay\s+(\d{1,2})\s+thang\s+(\d{1,2})\s+nam\s+(\d{4})",
+            re.IGNORECASE,
         )
-        match = DATE_VIET.search(text)
+        match = date_viet.search(text)
         if match:
             result = _parse_dmy(match.group(1), match.group(2), match.group(3))
             if result:
                 return result
 
-        # ── Priority 3: tách tại "ban hành", lấy phần sau ───────────────────
-        BANHANH_SPLIT = re.compile(r'ban\s*hành\s+', re.IGNORECASE)
-        parts = BANHANH_SPLIT.split(text, maxsplit=1)
+        banhanh_split = re.compile(r"ban\s*hanh\s+", re.IGNORECASE)
+        parts = banhanh_split.split(text, maxsplit=1)
         if len(parts) == 2:
             tail = parts[1]
-            # Ưu tiên "hiệu lực" trong tail
-            match = EFF_LABEL.search(tail)
-            if match:
-                result = _parse_dmy(match.group(1), match.group(2), match.group(3))
-                if result:
-                    return result
-            # Fallback: DD/MM/YYYY không nhãn trong tail
-            DATE_NOLABEL = re.compile(
-                r'(?<![A-Z0-9/])(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?![A-Z0-9/\-])',
-                re.IGNORECASE
-            )
-            match = DATE_NOLABEL.search(tail)
+            match = eff_label.search(tail)
             if match:
                 result = _parse_dmy(match.group(1), match.group(2), match.group(3))
                 if result:
                     return result
 
-        # ── Priority 4: fallback toàn bộ text ────────────────────────────────
-        DATE_FULL = re.compile(
-            r'(?:ngày\s+)?(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})',
-            re.IGNORECASE
+            date_nolabel = re.compile(
+                r"(?<![A-Z0-9/])(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?![A-Z0-9/\-])",
+                re.IGNORECASE,
+            )
+            match = date_nolabel.search(tail)
+            if match:
+                result = _parse_dmy(match.group(1), match.group(2), match.group(3))
+                if result:
+                    return result
+
+        date_full = re.compile(
+            r"(?:ngay\s+)?(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})",
+            re.IGNORECASE,
         )
-        match = DATE_FULL.search(text)
+        match = date_full.search(text)
         if match:
             result = _parse_dmy(match.group(1), match.group(2), match.group(3))
             if result:
                 return result
 
-        # ── Priority 5: standalone year ──────────────────────────────────────
-        YEAR_PAT = re.compile(r'(?<![A-Z0-9/])(\d{4})(?![A-Z0-9/\-])')
-        match = YEAR_PAT.search(text)
+        year_pat = re.compile(r"(?<![A-Z0-9/])(\d{4})(?![A-Z0-9/\-])")
+        match = year_pat.search(text)
         if match:
             return _parse_year(match.group(1))
 
         return None
 
     def _domain_priority(self, domain: str) -> int:
-        for i, alias in enumerate(self.source_priority):
+        for index, alias in enumerate(self.source_priority):
             canonical = SOURCE_ALIAS_MAP.get(alias, alias)
             if canonical == domain:
-                return i
+                return index
         return len(self.source_priority)

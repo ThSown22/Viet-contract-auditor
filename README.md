@@ -258,3 +258,20 @@ Thiết lập trong `.env` (không commit file thật lên git):
 1. Gắn retrieval pipeline đọc trực tiếp từ PostgreSQL + Neo4j + Qdrant workspace production.
 2. Triển khai LangGraph agents: Router -> Retrieval -> Audit -> Report Generator.
 3. Định nghĩa evaluator bộ chỉ số legal recall/precision và citation faithfulness.
+
+## 9. Ghi chú quan trọng: "Bộ Kỹ Năng" parser theo nguồn
+
+Trong dự án này, `config/sources.json` hoạt động như một **"Bộ Kỹ Năng"** cho bot crawler/parser.
+
+Ý nghĩa:
+
+- Đây là nơi dạy bot cách đọc khi đã đứng trong một website cụ thể.
+- Mỗi source có selector/rule riêng để lấy metadata và nội dung luật.
+- Khi thêm nguồn mới, cần thêm "kỹ năng" mới vào file này thay vì hard-code vào logic chung.
+
+Ví dụ:
+
+- Với `thuvienphapluat.vn`, bot lấy nội dung chính từ `.content1`.
+- Với `congbao.chinhphu.vn`, bot dùng các selector khác (`h1.title`, `.box-section--main span.text`, ...).
+
+Tóm lại: nếu bot "đọc sai trang", kiểm tra `config/sources.json` trước tiên vì đây là bản đồ parsing theo từng domain.
