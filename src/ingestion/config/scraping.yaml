@@ -1,0 +1,98 @@
+# Scraping pipeline configuration for Phase 2.
+
+canonical_laws:
+  "Bộ luật Dân sự":
+    # Regex-based rules keep working when future law IDs change.
+    priority_rules:
+      - type: "VBHN"
+        law_id_pattern: "VBHN"
+        title_pattern: "[Bb]ộ luật [Dd]ân sự"
+        sort_by: "effective_date"
+        sort_order: "desc"
+        reason: "Consolidated version has the fullest text."
+      - type: "ORIGINAL"
+        law_id_pattern: "QH\\d{2}"
+        title_pattern: "[Bb]ộ luật [Dd]ân sự \\d{4}"
+        exclude_pattern: "sửa đổi"
+        sort_by: "effective_date"
+        sort_order: "desc"
+        reason: "Original law, newest effective version."
+    output_filename: "bo_luat_dan_su.json"
+
+  "Luật Doanh nghiệp":
+    priority_rules:
+      - type: "VBHN"
+        law_id_pattern: "VBHN-VPQH"
+        title_pattern: "[Ll]uật [Dd]oanh nghiệp"
+        sort_by: "effective_date"
+        sort_order: "desc"
+        reason: "Latest consolidated version."
+      - type: "AMENDMENT"
+        law_id_pattern: "QH\\d{2}"
+        title_pattern: "([Ss]ửa đổi.*[Ll]uật [Dd]oanh nghiệp|[Ll]uật [Dd]oanh nghiệp.*sửa đổi)"
+        sort_by: "effective_date"
+        sort_order: "desc"
+        reason: "Newest amendment."
+      - type: "ORIGINAL"
+        law_id_pattern: "QH\\d{2}"
+        title_pattern: "[Ll]uật [Dd]oanh nghiệp \\d{4}"
+        exclude_pattern: "sửa đổi"
+        sort_by: "effective_date"
+        sort_order: "desc"
+        reason: "Original law."
+    output_filename: "luat_doanh_nghiep.json"
+
+  "Luật Trọng tài thương mại":
+    priority_rules:
+      - type: "VBHN"
+        law_id_pattern: "VBHN"
+        title_pattern: "[Ll]uật [Tt]rọng tài thương mại"
+        sort_by: "effective_date"
+        sort_order: "desc"
+        reason: "Latest consolidated version."
+      - type: "ORIGINAL"
+        law_id_pattern: "QH\\d{2}"
+        title_pattern: "[Ll]uật [Tt]rọng tài thương mại \\d{4}"
+        exclude_pattern: "sửa đổi"
+        sort_by: "effective_date"
+        sort_order: "desc"
+        reason: "Original law, newest effective version."
+    output_filename: "luat_trong_tai_thuong_mai.json"
+
+scraping_settings:
+  timeout_seconds: 60
+  retry_attempts: 3
+  delay_between_retries_sec: 5
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+  source_priority: ["thuvienphapluat.vn", "congbao.chinhphu.vn"]
+
+content_validation:
+  min_length_chars: 5000
+  required_keywords:
+    - "Điều 1"
+    - "Khoản 1"
+    - "Chương I"
+  blacklist_keywords:
+    - "Quảng cáo"
+    - "Liên hệ"
+    - "Đăng nhập"
+    - "Đăng ký"
+    - "Menu"
+
+output:
+  base_dir: "data/ingestion/scraped_content"
+  format: "json"
+  encoding: "utf-8"
+  exclude_raw_html: false
+  include_metadata:
+    - "law_id"
+    - "law_name"
+    - "source_url"
+    - "scraped_at"
+    - "effective_date"
+    - "title"
+
+state_management:
+  update_discovery_jsonl: true
+  atomic_updates: true
+  backup_before_update: true
