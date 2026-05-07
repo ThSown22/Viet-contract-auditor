@@ -24,15 +24,23 @@ from src.ingestion.scraping.normalizers.structured_parser import reconstruct_str
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CONFIG_PATH = PROJECT_ROOT / "src" / "ingestion" / "config" / "cleaning.yaml"
 LOG_DIR = PROJECT_ROOT / "logs"
-LOG_DIR.mkdir(exist_ok=True)
+
+
+def should_log_to_file() -> bool:
+    return os.getenv("LOG_TO_FILE", "true").lower() == "true"
+
+
+def build_log_handlers() -> list[logging.Handler]:
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+    if should_log_to_file():
+        LOG_DIR.mkdir(exist_ok=True)
+        handlers.append(logging.FileHandler(LOG_DIR / "cleaning.log", encoding="utf-8"))
+    return handlers
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
-    handlers=[
-        logging.FileHandler(LOG_DIR / "cleaning.log", encoding="utf-8"),
-        logging.StreamHandler(),
-    ],
+    handlers=build_log_handlers(),
 )
 logger = logging.getLogger(__name__)
 
