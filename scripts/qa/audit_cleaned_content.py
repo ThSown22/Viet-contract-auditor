@@ -9,13 +9,14 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA_DIR = PROJECT_ROOT / "data"
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.ingestion.legal_text_patterns import is_structural_marker
 
 
-CLEANED_DIR = PROJECT_ROOT / "data" / "ingestion" / "cleaned_content"
+CLEANED_DIR = DATA_DIR / "processed"
 BLANK_ARTICLE_RE = re.compile(r"^Điều\s+\d+\.$")
 ORPHAN_LINE_RE = re.compile(r"^[A-Za-zÀ-ỹĐđ]{1,12}(?:\s+[A-Za-zÀ-ỹĐđ]{1,12})?$")
 ARTIFACT_MARKERS = (

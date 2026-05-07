@@ -19,6 +19,8 @@ from src.ingestion.scraping.normalizers.structured_parser import reconstruct_str
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DATA_DIR = PROJECT_ROOT / "data"
+INGESTION_DIR = DATA_DIR / "ingestion"
 LOG_DIR = PROJECT_ROOT / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
@@ -75,8 +77,8 @@ def main() -> int:
     logger.info("START PHASE 2.5: CONTENT CLEANING PIPELINE")
     logger.info("=" * 80)
 
-    input_dir = PROJECT_ROOT / "data" / "ingestion" / "scraped_content"
-    output_dir = PROJECT_ROOT / "data" / "ingestion" / "cleaned_content"
+    input_dir = INGESTION_DIR / "scraped_content"
+    output_dir = DATA_DIR / "processed"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     cleaner = VietnameseLegalTextCleaner()

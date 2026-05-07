@@ -20,6 +20,8 @@ data/
 # Giữ cấu trúc folder data nhưng bỏ qua file:
 !data/.gitkeep
 
+docs/
+
 logs/
 
 # IDE
@@ -42,3 +44,4 @@ Project_base_knowledge.md
 
 # Scratch / test files
 sample_contract.txt
+note.txt
