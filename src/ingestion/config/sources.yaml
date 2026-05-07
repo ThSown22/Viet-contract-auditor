@@ -48,4 +48,5 @@ sources:
       target_selector: ".box-option-right .list--open"
       link_selector: "a.item-open"
       filter: ".pdf"
+      ssl_verify: false
     content_selector: "#pdf-container"

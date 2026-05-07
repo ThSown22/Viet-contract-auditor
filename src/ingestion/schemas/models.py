@@ -17,6 +17,12 @@ class DiscoveredLink(BaseModel):
     effective_date: Optional[str] = None
 
 
+class ScrapedArticle(BaseModel):
+    article_id: str
+    title: str
+    text: str
+
+
 class ScrapedContent(BaseModel):
     """Normalized content saved by Phase 2 scraping. - Là cái gì đc lưu vào jsonl."""
 
@@ -28,6 +34,8 @@ class ScrapedContent(BaseModel):
 
     raw_html: Optional[str] = None
     clean_text: str
+    structured_text: Optional[str] = None
+    articles: list[ScrapedArticle] = Field(default_factory=list)
 
     scraped_at: datetime = Field(default_factory=datetime.now)
     effective_date: Optional[str] = None
@@ -35,6 +43,7 @@ class ScrapedContent(BaseModel):
 
     char_count: int = 0
     word_count: int = 0
+    article_count: int = 0
     has_structure: bool = False
 
     scraping_duration_sec: Optional[float] = None

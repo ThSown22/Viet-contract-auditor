@@ -8,6 +8,7 @@ import requests
 
 from src.ingestion.schemas.models import ScrapedContent, ScrapingResult
 from src.ingestion.scraping.normalizers.content_cleaner import ContentCleaner
+from src.ingestion.scraping.normalizers.structured_parser import parse_articles, reconstruct_structured_text
 
 logger = logging.getLogger(__name__)
 
@@ -62,19 +63,25 @@ class BaseScraper(ABC):
                 )
 
             duration = round(time.perf_counter() - started_at, 3)
+            resolved_law_id = law_id or metadata.get("law_id") or "unknown"
+            articles = parse_articles(clean_text, resolved_law_id)
+            structured_text = reconstruct_structured_text(articles) if articles else clean_text
             content = ScrapedContent(
                 law_name=law_name,
-                law_id=(law_id or metadata.get("law_id") or "unknown"),
+                law_id=resolved_law_id,
                 source_url=url,
                 source_domain=self._extract_domain(url),
                 title=metadata.get("title") or "Unknown",
                 raw_html=html[:5000],
                 clean_text=clean_text,
+                structured_text=structured_text,
+                articles=articles,
                 effective_date=metadata.get("effective_date"),
                 published_at=metadata.get("published_at"),
                 char_count=len(clean_text),
                 word_count=len(clean_text.split()),
-                has_structure=self.cleaner.has_structure(clean_text),
+                article_count=len(articles),
+                has_structure=bool(articles) or self.cleaner.has_structure(clean_text),
                 scraping_duration_sec=duration,
                 validation_passed=True,
             )
@@ -95,7 +102,7 @@ class BaseScraper(ABC):
         for attempt in range(1, self.retry_limit + 1):
             try:
                 logger.debug("Fetch attempt %s/%s: %s", attempt, self.retry_limit, url)
-                response = requests.get(url, headers=self.headers, timeout=self.timeout)
+                response = self._http_get(url)
                 response.raise_for_status()
                 response.encoding = response.apparent_encoding or "utf-8"
                 return response.text
@@ -122,3 +129,6 @@ class BaseScraper(ABC):
 
     def _extract_domain(self, url: str) -> str:
         return urlparse(url).netloc.replace("www.", "")
+
+    def _http_get(self, url: str, verify: bool = True) -> requests.Response:
+        return requests.get(url, headers=self.headers, timeout=self.timeout, verify=verify)

@@ -37,7 +37,7 @@ class ContentCleaner:
     def __init__(self, validation_config: dict | None = None):
         self.validation_config = validation_config or {}
         blacklist = self.validation_config.get("blacklist_keywords", [])
-        self.blacklist = set(self.DEFAULT_ARTIFACTS + [normalize_text(item) for item in blacklist])
+        self.blacklist = {item for item in (self.DEFAULT_ARTIFACTS + [normalize_text(entry) for entry in blacklist]) if item}
 
     def clean(self, raw_text: str) -> str:
         """Remove obvious UI artifacts and normalize spacing."""
@@ -87,8 +87,9 @@ class ContentCleaner:
 
         blacklist_keywords = self.validation_config.get("blacklist_keywords", [])
         if blacklist_keywords:
-            blacklist = [normalize_text(item) for item in blacklist_keywords]
-            if any(item in normalized for item in blacklist):
+            blacklist = {normalize_text(item) for item in blacklist_keywords if item}
+            normalized_lines = [normalize_text(line) for line in clean_text.splitlines() if line.strip()]
+            if any(line in blacklist or self._is_navigation_compound(line) for line in normalized_lines):
                 return False
 
         return True
@@ -109,8 +110,12 @@ class ContentCleaner:
             return True
         if len(normalized) < 3:
             return True
-        if any(keyword in normalized for keyword in self.blacklist):
+        if self._is_navigation_compound(normalized):
             return True
         if normalized.startswith("tai ve") and len(normalized) < 120:
             return True
         return False
+
+    def _is_navigation_compound(self, normalized: str) -> bool:
+        parts = [part.strip() for part in re.split(r"[|/,;-]+", normalized) if part.strip()]
+        return len(parts) > 1 and all(part in self.blacklist for part in parts)
