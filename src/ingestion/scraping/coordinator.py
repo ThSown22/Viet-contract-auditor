@@ -1,6 +1,7 @@
 import argparse
 import json
 import logging
+import os
 import re
 from collections import defaultdict
 from copy import deepcopy
@@ -32,12 +33,21 @@ class ScrapingCoordinator:
         self.discovery_file = discovery_file
         self.scraping_config = self._load_yaml(scraping_config_path)
         self.sources_config = self._load_yaml(sources_config_path)
-        self.discovery_config = self._load_yaml("src/ingestion/config/discovery.yaml")
+        config_dir = Path(scraping_config_path).parent
+        self.discovery_config = self._load_yaml(str(config_dir / "discovery.yaml"))
 
         self.state_manager = StateManager(discovery_file)
         self.source_priority = self.scraping_config.get("scraping_settings", {}).get("source_priority", [])
         self.law_match_terms = self._build_law_match_terms()
-        self.output_dir = Path(self.scraping_config["output"]["base_dir"])
+        data_root = os.getenv("DATA_DIR", "")
+        base_output = self.scraping_config["output"]["base_dir"]
+
+        if data_root:
+            self.output_dir = Path(data_root) / base_output
+        else:
+            PROJECT_ROOT = Path(__file__).resolve().parents[3]
+            self.output_dir = PROJECT_ROOT / base_output
+
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.scrapers = self._init_scrapers()
         self._last_unmatched_count = 0

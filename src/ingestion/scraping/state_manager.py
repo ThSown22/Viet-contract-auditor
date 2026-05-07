@@ -66,9 +66,14 @@ class StateManager:
 
     def _write_records(self, records: List[dict]) -> None:
         temp_path = self.jsonl_path.with_suffix(".tmp")
-        with jsonlines.open(temp_path, mode="w") as writer:
-            writer.write_all(records)
-        temp_path.replace(self.jsonl_path)
+        try:
+            with jsonlines.open(temp_path, mode="w") as writer:
+                writer.write_all(records)
+            temp_path.replace(self.jsonl_path)
+        except Exception:
+            if temp_path.exists():
+                temp_path.unlink()
+            raise
 
     @staticmethod
     def _mark_record_processed(record: dict) -> bool:

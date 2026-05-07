@@ -8,6 +8,7 @@ import glob
 import threading
 from collections import namedtuple
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import List
 from urllib.parse import urlparse, urlunparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -81,7 +82,15 @@ class DiscoveryRunner:
         self.engine = engine_class(self.config)
         logger.info(f" Da chon discovery engine: {engine_key}")
 
-        self.output_dir = self.config["storage"]["output_dir"]
+        data_root = os.getenv("DATA_DIR", "")
+        base_output = self.config["storage"]["output_dir"]
+
+        if data_root:
+            self.output_dir = str(Path(data_root) / base_output)
+        else:
+            PROJECT_ROOT = Path(__file__).resolve().parents[3]
+            self.output_dir = str(PROJECT_ROOT / base_output)
+
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
 
