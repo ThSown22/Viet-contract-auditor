@@ -1,0 +1,14 @@
+input:
+  base_dir: "data/ingestion/scraped_content"
+
+output:
+  base_dir: "data/processed"
+
+validation:
+  min_chars: 5000
+  required_keywords:
+    - "Điều 1"
+  blacklist_keywords:
+    - "VĂN PHÒNG QUỐC HỘI"
+    - "Căn cứ Hiến pháp"
+    - "Quảng cáo"

@@ -1,11 +1,14 @@
-"""Phase 2.5 runner - content cleaning pipeline."""
+"""Phase 3 runner - content cleaning pipeline."""
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from pathlib import Path
+
+import yaml
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -19,8 +22,7 @@ from src.ingestion.scraping.normalizers.structured_parser import reconstruct_str
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-DATA_DIR = PROJECT_ROOT / "data"
-INGESTION_DIR = DATA_DIR / "ingestion"
+CONFIG_PATH = PROJECT_ROOT / "src" / "ingestion" / "config" / "cleaning.yaml"
 LOG_DIR = PROJECT_ROOT / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
@@ -33,6 +35,31 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger(__name__)
+
+
+def load_config(config_path: Path | None = None) -> dict:
+    config_path = config_path or CONFIG_PATH
+    with config_path.open("r", encoding="utf-8") as handle:
+        return yaml.safe_load(handle)
+
+
+def resolve_data_root() -> Path:
+    return Path(os.getenv("DATA_DIR", str(PROJECT_ROOT)))
+
+
+def is_processed_output(path: Path) -> bool:
+    return path.exists() and path.stat().st_size > 0
+
+
+def write_text_atomic(path: Path, content: str) -> None:
+    temp_file = path.with_suffix(".tmp")
+    try:
+        temp_file.write_text(content, encoding="utf-8")
+        temp_file.replace(path)
+    except Exception:
+        if temp_file.exists():
+            temp_file.unlink()
+        raise
 
 
 def count_articles(text: str) -> int:
@@ -74,22 +101,20 @@ def resolve_input_text(data: dict) -> str:
 
 def main() -> int:
     logger.info("\n" + "=" * 80)
-    logger.info("START PHASE 2.5: CONTENT CLEANING PIPELINE")
+    logger.info("START PHASE 3: CONTENT CLEANING PIPELINE")
     logger.info("=" * 80)
 
-    input_dir = INGESTION_DIR / "scraped_content"
-    output_dir = DATA_DIR / "processed"
+    config = load_config()
+    data_root = resolve_data_root()
+    input_dir = data_root / config["input"]["base_dir"]
+    output_dir = data_root / config["output"]["base_dir"]
     output_dir.mkdir(parents=True, exist_ok=True)
 
     cleaner = VietnameseLegalTextCleaner()
     validator = CleanedContentValidator(
-        min_chars=5000,
-        required_keywords=["Điều 1"],
-        blacklist_keywords=[
-            "VĂN PHÒNG QUỐC HỘI",
-            "Căn cứ Hiến pháp",
-            "Quảng cáo",
-        ],
+        min_chars=config["validation"]["min_chars"],
+        required_keywords=config["validation"]["required_keywords"],
+        blacklist_keywords=config["validation"]["blacklist_keywords"],
     )
 
     json_files = sorted(input_dir.glob("*.json"))
@@ -101,9 +126,14 @@ def main() -> int:
 
     for json_file in json_files:
         try:
+            output_file = output_dir / f"{json_file.stem}.txt"
+            if is_processed_output(output_file):
+                logger.info("SKIP: %s (already processed)", output_file.name)
+                stats["success"] += 1
+                continue
+
             logger.info("\n%s", "=" * 60)
             logger.info("Processing: %s", json_file.name)
-            output_file = output_dir / f"{json_file.stem}.txt"
 
             with json_file.open("r", encoding="utf-8") as handle:
                 data = json.load(handle)
@@ -135,7 +165,7 @@ def main() -> int:
                 stats["failed"] += 1
                 continue
 
-            output_file.write_text(cleaned, encoding="utf-8")
+            write_text_atomic(output_file, cleaned)
 
             logger.info("  Articles: %s", count_articles(cleaned))
             logger.info("Saved: %s", output_file.name)
