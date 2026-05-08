@@ -22,14 +22,11 @@ else:
     from .chunker import VietnameseLegalChunker
     from ..schemas.models import ChunkingConfig
 
+# Configure stdout for Vietnamese characters (Windows-safe)
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 logger = logging.getLogger(__name__)
-
-
-def configure_stdout() -> None:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-
 
 def should_log_to_file() -> bool:
     return os.getenv("LOG_TO_FILE", "true").lower() == "true"
@@ -107,7 +104,6 @@ def write_chunks_atomic(output_file: Path, chunks: list) -> None:
 
 
 def main() -> int:
-    configure_stdout()
     logger.info("\n%s", "=" * 80)
     logger.info("START PHASE 4: SEMANTIC CHUNKING PIPELINE")
     logger.info("%s", "=" * 80)
