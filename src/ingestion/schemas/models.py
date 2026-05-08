@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 
 class DiscoveredLink(BaseModel):
@@ -58,3 +58,42 @@ class ScrapingResult(BaseModel):
     error_message: Optional[str] = None
     attempted_url: str
     fallback_level: int = 0
+
+
+class ArticleBlock(BaseModel):
+    """Intermediate representation of one parsed article."""
+
+    number: int
+    title: str
+    full_text: str
+    token_count: int = 0
+
+
+class LegalChunk(BaseModel):
+    """Final output chunk schema."""
+
+    chunk_id: str
+    law_id: str
+    law_name: str
+    article_ids: list[str]
+    article_titles: list[str]
+    text: str
+    token_count: int
+    char_count: int
+    has_overlap: bool
+    prev_chunk_id: Optional[str] = None
+    next_chunk_id: Optional[str] = None
+
+
+class ChunkingConfig(BaseModel):
+    """Config validation schema."""
+
+    target_min_tokens: int = Field(ge=1)
+    target_max_tokens: int = Field(ge=1)
+    overlap_tokens: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_token_bounds(self) -> "ChunkingConfig":
+        if self.target_max_tokens < self.target_min_tokens:
+            raise ValueError("target_max_tokens must be >= target_min_tokens")
+        return self

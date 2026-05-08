@@ -1,9 +1,24 @@
-"""Shared structural patterns for Vietnamese legal text."""
+"""Vietnamese legal text regex patterns - reusable across phases."""
 
 from __future__ import annotations
 
 import re
 
+
+ARTICLE_PATTERN = re.compile(
+    r"^(Điều\s+\d+[\.:]\s*.*)",
+    re.MULTILINE | re.UNICODE,
+)
+
+CLAUSE_PATTERN = re.compile(
+    r"^\s*(\d+)\.\s+",
+    re.MULTILINE | re.UNICODE,
+)
+
+POINT_PATTERN = re.compile(
+    r"^\s*([a-zđ])\)\s+",
+    re.MULTILINE | re.UNICODE,
+)
 
 PART_ORDINAL_RE = r"(?:[IVXLC\d]+|[A-Za-zÀ-ỹĐđ]+)"
 
@@ -43,8 +58,15 @@ def is_structural_marker(line: str) -> bool:
     return any(pattern.match(stripped) for pattern in STRUCTURAL_MARKER_PATTERNS)
 
 
-def extract_article_number(line: str) -> int | None:
-    """Extract the article number from an article header."""
+def extract_article_number(header: str) -> int | None:
+    """Extract article number from an article header."""
 
-    match = ARTICLE_NUMBER_RE.match((line or "").strip())
+    match = ARTICLE_NUMBER_RE.match((header or "").strip())
     return int(match.group(1)) if match else None
+
+
+def extract_article_title(header: str) -> str:
+    """Extract title. Example: 'Điều 15. Quyền' -> 'Quyền'."""
+
+    match = ARTICLE_HEADER_RE.match((header or "").strip())
+    return match.group(2).strip() if match else ""

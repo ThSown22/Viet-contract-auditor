@@ -1,0 +1,11 @@
+input:
+  base_dir: "data/processed"
+
+output:
+  base_dir: "data/chunks"
+  format: "jsonl"
+
+chunking:
+  target_min_tokens: 800
+  target_max_tokens: 1200
+  overlap_tokens: 100
