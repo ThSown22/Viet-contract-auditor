@@ -4,6 +4,7 @@ import logging
 import math
 import re
 import unicodedata
+from collections import Counter
 
 import spacy
 import tiktoken
@@ -200,11 +201,11 @@ class VietnameseLegalChunker:
             raw_candidates.extend(self._build_raw_chunks([article], law_id))
 
         raw_chunks = self._pack_raw_chunks(raw_candidates)
+        chunk_ids = self._build_unique_chunk_ids(law_name, raw_chunks)
 
-        law_prefix = self._make_law_prefix(law_name)
         chunks: list[LegalChunk] = []
 
-        for index, chunk_data in enumerate(raw_chunks):
+        for index, (chunk_data, chunk_id) in enumerate(zip(raw_chunks, chunk_ids, strict=True)):
             text = str(chunk_data["text"]).strip()
             has_overlap = False
 
@@ -214,11 +215,6 @@ class VietnameseLegalChunker:
                     text = f"{overlap_text}\n\n{text}"
                     has_overlap = True
 
-            chunk_id = self._make_chunk_id(
-                law_prefix=law_prefix,
-                article_numbers=list(chunk_data["article_numbers"]),
-                part_index=int(chunk_data["part_index"]),
-            )
             chunk = LegalChunk(
                 chunk_id=chunk_id,
                 law_id=law_id,
@@ -237,6 +233,38 @@ class VietnameseLegalChunker:
             chunk.next_chunk_id = chunks[index + 1].chunk_id if index + 1 < len(chunks) else None
 
         return chunks
+
+    def _build_unique_chunk_ids(self, law_name: str, raw_chunks: list[dict[str, object]]) -> list[str]:
+        """Assign stable unique chunk IDs after packing.
+
+        Packing can leave multiple chunks covering the same single article.
+        In that case, the article-range-based base ID repeats and must be
+        suffixed deterministically to stay unique for downstream indexing.
+        """
+
+        law_prefix = self._make_law_prefix(law_name)
+        provisional_ids = [
+            self._make_chunk_id(
+                law_prefix=law_prefix,
+                article_numbers=list(chunk_data["article_numbers"]),
+                part_index=int(chunk_data["part_index"]),
+            )
+            for chunk_data in raw_chunks
+        ]
+        duplicate_counts = Counter(provisional_ids)
+        seen_counts: Counter[str] = Counter()
+        resolved_ids: list[str] = []
+
+        for provisional_id in provisional_ids:
+            if duplicate_counts[provisional_id] == 1:
+                resolved_ids.append(provisional_id)
+                continue
+
+            base_id = re.sub(r"_p\d+$", "", provisional_id)
+            seen_counts[base_id] += 1
+            resolved_ids.append(f"{base_id}_p{seen_counts[base_id]}")
+
+        return resolved_ids
 
     def _build_raw_chunks(self, group: list[ArticleBlock], law_id: str) -> list[dict[str, object]]:
         """Create raw chunk payloads before overlap and linking are applied."""

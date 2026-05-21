@@ -1,0 +1,32 @@
+input:
+  base_dir: "data/chunks"
+  pattern: "*_chunks.jsonl"
+
+output:
+  base_dir: "data/index"
+
+checkpoint:
+  filename: "checkpoint.json"
+
+indexing:
+  batch_size: 16
+  max_retries: 3
+  max_async: 8
+  resume: true
+
+embedding:
+  model_env: "OPENAI_EMBEDDING_MODEL"
+  default_model_name: "text-embedding-3-small"
+
+llm:
+  api_key_env: "OPENAI_API_KEY"
+  model_env: "OPENAI_LLM_MODEL"
+  default_model_name: "gpt-4o-mini"
+  max_tokens: 1024
+  temperature: 0.0
+
+lightrag:
+  chunk_token_size: 2400
+  chunk_overlap_token_size: 100
+  enable_rerank: false
+  enable_llm_cache: false
