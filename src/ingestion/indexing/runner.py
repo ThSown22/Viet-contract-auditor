@@ -31,6 +31,10 @@ if __package__ in {None, ""}:
         index_documents,
     )
     from src.ingestion.indexing.loader import load_chunks
+    from src.ingestion.indexing.publish_storage import (
+        build_publish_config_from_runtime,
+        publish_index_to_storage,
+    )
 else:
     from .checkpoint import (
         IndexingCheckpoint,
@@ -47,6 +51,10 @@ else:
         index_documents,
     )
     from .loader import load_chunks
+    from .publish_storage import (
+        build_publish_config_from_runtime,
+        publish_index_to_storage,
+    )
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -101,6 +109,14 @@ class LightRAGConfig(BaseModel):
     enable_llm_cache: bool = False
 
 
+class PublishConfig(BaseModel):
+    enabled: bool = False
+    verify_after_publish: bool = True
+    batch_size_kv: int = Field(default=200, ge=1)
+    batch_size_graph: int = Field(default=200, ge=1)
+    batch_size_vector: int = Field(default=100, ge=1)
+
+
 class IndexingConfig(BaseModel):
     input: InputConfig
     output: OutputConfig
@@ -109,6 +125,7 @@ class IndexingConfig(BaseModel):
     embedding: EmbeddingConfig
     llm: LLMConfig
     lightrag: LightRAGConfig
+    publish: PublishConfig = Field(default_factory=PublishConfig)
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +152,11 @@ class ResolvedRuntimeConfig:
     lightrag_chunk_overlap_token_size: int
     lightrag_enable_rerank: bool
     lightrag_enable_llm_cache: bool
+    publish_enabled: bool
+    publish_verify_after_publish: bool
+    publish_batch_size_kv: int
+    publish_batch_size_graph: int
+    publish_batch_size_vector: int
 
 
 def should_log_to_file() -> bool:
@@ -228,13 +250,18 @@ def resolve_runtime_config(config: IndexingConfig) -> ResolvedRuntimeConfig:
         lightrag_chunk_overlap_token_size=config.lightrag.chunk_overlap_token_size,
         lightrag_enable_rerank=config.lightrag.enable_rerank,
         lightrag_enable_llm_cache=config.lightrag.enable_llm_cache,
+        publish_enabled=config.publish.enabled,
+        publish_verify_after_publish=config.publish.verify_after_publish,
+        publish_batch_size_kv=config.publish.batch_size_kv,
+        publish_batch_size_graph=config.publish.batch_size_graph,
+        publish_batch_size_vector=config.publish.batch_size_vector,
     )
 
 
 def validate_runtime_config(runtime: ResolvedRuntimeConfig) -> list[str]:
     errors: list[str] = []
 
-    if not runtime.llm_api_key:
+    if not runtime.llm_api_key and not runtime.publish_enabled:
         errors.append(
             f"Thiếu API key bắt buộc trong biến môi trường {runtime.llm_api_key_env}"
         )
@@ -302,6 +329,14 @@ def log_startup_summary(runtime: ResolvedRuntimeConfig) -> None:
         runtime.lightrag_chunk_overlap_token_size,
         runtime.lightrag_enable_rerank,
         runtime.lightrag_enable_llm_cache,
+    )
+    logger.info(
+        "Publish config: enabled=%s verify=%s kv_batch=%s graph_batch=%s vector_batch=%s",
+        runtime.publish_enabled,
+        runtime.publish_verify_after_publish,
+        runtime.publish_batch_size_kv,
+        runtime.publish_batch_size_graph,
+        runtime.publish_batch_size_vector,
     )
 
 
@@ -404,6 +439,32 @@ async def run_indexing_pipeline(
     documents: list[dict[str, Any]],
     checkpoint: IndexingCheckpoint,
 ) -> int:
+    async def run_publish_step() -> int:
+        if not runtime.publish_enabled:
+            return 0
+
+        publish_config = build_publish_config_from_runtime(runtime)
+        logger.info(
+            "Bat dau publish artifact tu %s len production storages",
+            publish_config.index_dir,
+        )
+        try:
+            summary = await publish_index_to_storage(publish_config)
+        except Exception as exc:
+            logger.error("Publish artifact that bai: %s", exc, exc_info=True)
+            return 1
+
+        logger.info(
+            "Publish hoan tat | kv=%s | graph=%s | vectors=%s",
+            summary.get("kv_counts"),
+            summary.get("graph"),
+            summary.get("vectors"),
+        )
+        verification = summary.get("verification")
+        if verification is not None:
+            logger.info("Publish verification: %s", verification)
+        return 0
+
     pending_documents = select_documents_for_indexing(
         documents,
         checkpoint,
@@ -419,7 +480,7 @@ async def run_indexing_pipeline(
     if not pending_documents:
         save_checkpoint(runtime.checkpoint_path, checkpoint)
         logger.info("Không còn document nào cần index")
-        return 0
+        return await run_publish_step()
 
     client_config = build_client_config_from_runtime(runtime)
     rag = await build_lightrag_client(client_config)
@@ -504,7 +565,7 @@ async def run_indexing_pipeline(
         return 1
 
     logger.info("Indexing hoàn tất thành công")
-    return 0
+    return await run_publish_step()
 
 
 def main() -> int:

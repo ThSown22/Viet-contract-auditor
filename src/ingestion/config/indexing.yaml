@@ -30,3 +30,10 @@ lightrag:
   chunk_overlap_token_size: 100
   enable_rerank: false
   enable_llm_cache: false
+
+publish:
+  enabled: true
+  verify_after_publish: true
+  batch_size_kv: 200
+  batch_size_graph: 200
+  batch_size_vector: 100

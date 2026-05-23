@@ -6,10 +6,10 @@ services:
     container_name: viet-contract-neo4j
     restart: unless-stopped
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - "7474:7474" # Cổng để vào Web xem đồ thị
+      - "7687:7687" # Cổng để code Python kết nối lấy data
     environment:
-      NEO4J_AUTH: ${NEO4J_AUTH:-neo4j/contract_audit_2024}
+      NEO4J_AUTH: ${NEO4J_AUTH:?Set NEO4J_AUTH in .env}
       NEO4J_PLUGINS: '["apoc"]'
       NEO4J_dbms_security_procedures_unrestricted: apoc.*
       NEO4J_dbms_security_procedures_allowlist: apoc.*
@@ -19,7 +19,7 @@ services:
       - neo4j_data:/data
       - neo4j_logs:/logs
     healthcheck:
-      test: ["CMD-SHELL", "cypher-shell -u neo4j -p contract_audit_2024 'RETURN 1;' || exit 1"]
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$${NEO4J_AUTH#neo4j/}\" 'RETURN 1;' || exit 1"]
       interval: 10s
       timeout: 10s
       retries: 10
@@ -45,13 +45,13 @@ services:
     ports:
       - "55432:5432"
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-viet_contract}
-      POSTGRES_USER: ${POSTGRES_USER:-rag}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rag_secure_pwd}
+      POSTGRES_DB: ${POSTGRES_DATABASE:?Set POSTGRES_DATABASE in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rag} -d ${POSTGRES_DB:-viet_contract}"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 10s
       timeout: 10s
       retries: 10
