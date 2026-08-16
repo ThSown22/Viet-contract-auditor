@@ -1,4 +1,3 @@
-2
 
 # Viet Contract Auditor
 
