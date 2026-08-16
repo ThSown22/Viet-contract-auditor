@@ -20,7 +20,9 @@ data/
 # Giữ cấu trúc folder data nhưng bỏ qua file:
 !data/.gitkeep
 
-docs/
+docs/*
+!docs/
+!docs/MAS_pipeline_flow.md
 
 logs/
 
@@ -43,5 +45,7 @@ Project_base_knowledge.md
 .claude/settings.local.json
 
 # Scratch / test files
+.tmp/
+.pytest-temp/
 sample_contract.txt
 note.txt
